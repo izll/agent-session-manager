@@ -250,9 +250,15 @@ func (i *Instance) UpdateDetachBinding(previewWidth, previewHeight int) {
 		return
 	}
 	sessionName := i.TmuxSessionName()
-	// Bind Ctrl+Q to: resize-window, then detach - all in one shell command
-	shellCmd := fmt.Sprintf("tmux resize-window -t %s -x %d -y %d; tmux detach-client", sessionName, previewWidth, previewHeight)
-	exec.Command("tmux", "bind-key", "-n", "C-q", "run-shell", shellCmd).Run()
+	// Bind Ctrl+Q: CSM sessions get resize+detach, all others get plain detach
+	shellScript := fmt.Sprintf(`
+SESSION=$(tmux display-message -p '#{session_name}')
+if echo "$SESSION" | grep -q '^csm_'; then
+  tmux resize-window -t %s -x %d -y %d
+fi
+tmux detach-client
+`, sessionName, previewWidth, previewHeight)
+	exec.Command("tmux", "bind-key", "-n", "C-q", "run-shell", shellScript).Run()
 }
 
 // EnsurePty ensures we have a PTY connection (for restored instances)

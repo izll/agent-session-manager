@@ -16,6 +16,26 @@ import (
 	"github.com/izll/claude-session-manager/session"
 )
 
+// Layout constants
+const (
+	ListPaneWidth        = 45  // Fixed width for session list panel
+	BorderPadding        = 3   // Border and padding offset
+	MinPreviewWidth      = 40  // Minimum preview panel width
+	TmuxWidthOffset      = 2   // Offset to prevent line wrapping in tmux
+	HeightOffset         = 8   // Height offset for UI elements
+	MinContentHeight     = 10  // Minimum content height
+	MinPreviewLines      = 5   // Minimum preview lines to show
+	PreviewHeaderHeight  = 6   // Height of preview header area
+	ColorPickerHeader    = 12  // Height of color picker header
+	MinColorPickerRows   = 5   // Minimum visible color options
+	SessionListMaxItems  = 8   // Max visible items in session selector
+	PreviewLineCount     = 100 // Number of lines to capture for preview
+	GradientColorCount   = 15  // Number of gradient options (for background exclusion)
+	PromptMinWidth       = 50  // Minimum prompt input width
+	PromptMaxWidth       = 70  // Maximum prompt input width
+	TickInterval         = 100 * time.Millisecond // UI refresh interval
+)
+
 // ansiRegex matches ANSI escape sequences
 var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 
@@ -79,6 +99,9 @@ const (
 	statePrompt // Send text to session
 )
 
+// Model represents the main TUI application state for Claude Session Manager.
+// It manages multiple Claude Code instances, handles user input, and renders
+// the split-pane interface with session list and preview.
 type Model struct {
 	instances       []*session.Instance
 	storage         *session.Storage
@@ -109,6 +132,9 @@ type Model struct {
 type tickMsg time.Time
 type reattachMsg struct{}
 
+// NewModel creates and initializes a new TUI Model.
+// It loads existing sessions from storage, sets up input fields, and
+// prepares the initial state for the Bubble Tea program.
 func NewModel() (Model, error) {
 	storage, err := session.NewStorage()
 	if err != nil {
@@ -158,12 +184,19 @@ func NewModel() (Model, error) {
 
 	// Initialize preview for first instance
 	if len(instances) > 0 {
-		m.preview, _ = instances[0].GetPreview(100)
+		preview, err := instances[0].GetPreview(PreviewLineCount)
+		if err != nil {
+			m.preview = "(error loading preview)"
+		} else {
+			m.preview = preview
+		}
 	}
 
 	return m, nil
 }
 
+// Init implements tea.Model and returns the initial command for the program.
+// It sets up the terminal appearance and starts the tick timer.
 func (m Model) Init() tea.Cmd {
 	// Set terminal tab color (works in some terminals like iTerm2, Konsole)
 	// Purple color to match the theme
@@ -180,11 +213,13 @@ func (m Model) Init() tea.Cmd {
 }
 
 func tickCmd() tea.Cmd {
-	return tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
+	return tea.Tick(TickInterval, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
 }
 
+// Update implements tea.Model and handles all incoming messages.
+// It delegates to specialized handlers based on the current state.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	var cmds []tea.Cmd
@@ -196,36 +231,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Resize selected instance's tmux pane to match preview width
 		if len(m.instances) > 0 && m.cursor < len(m.instances) {
 			inst := m.instances[m.cursor]
-			previewWidth := m.width - 45 - 3 // Same calculation as in listView
-			if previewWidth < 40 {
-				previewWidth = 40
-			}
-			tmuxWidth := previewWidth - 2 // Slightly narrower to avoid line wrapping
 			if inst.Status == session.StatusRunning {
-				inst.ResizePane(tmuxWidth, m.height-8)
-				// Update Ctrl+Q binding to resize to preview before detach
-				inst.UpdateDetachBinding(tmuxWidth, m.height-8)
+				tmuxWidth, tmuxHeight := m.calculateTmuxDimensions()
+				inst.ResizePane(tmuxWidth, tmuxHeight)
+				inst.UpdateDetachBinding(tmuxWidth, tmuxHeight)
 			}
 		}
 		return m, nil
 
 	case reattachMsg:
-		// Ctrl+Q should have resized before detach, but do backup resize
-		if len(m.instances) > 0 && m.cursor < len(m.instances) {
-			inst := m.instances[m.cursor]
-			if inst.Status == session.StatusRunning {
-				previewWidth := m.width - 45 - 3
-				if previewWidth < 40 {
-					previewWidth = 40
-				}
-				tmuxWidth := previewWidth - 2 // Slightly narrower to avoid line wrapping
-				inst.ResizePane(tmuxWidth, m.height-8)
-				// Reattach PTY for preview size control
-				inst.EnsurePty()
-			}
-		}
-		// Clear screen and re-enable mouse
-		return m, tea.Batch(tea.ClearScreen, tea.EnableMouseCellMotion)
+		// Request window size to refresh dimensions after reattach
+		return m, tea.Batch(tea.ClearScreen, tea.EnableMouseCellMotion, tea.WindowSize())
 
 	case tea.MouseMsg:
 		// Handle mouse wheel scrolling in list view
@@ -284,10 +300,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Update preview for selected instance (more lines for better visibility)
+		// Update preview for selected instance
 		if len(m.instances) > 0 && m.cursor < len(m.instances) {
-			preview, _ := m.instances[m.cursor].GetPreview(100)
-			m.preview = preview
+			preview, err := m.instances[m.cursor].GetPreview(PreviewLineCount)
+			if err != nil {
+				m.preview = "(error loading preview)"
+			} else {
+				m.preview = preview
+			}
 		}
 		return m, tickCmd()
 
@@ -330,16 +350,202 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
+// calculatePreviewWidth returns the width for the preview panel
+func (m *Model) calculatePreviewWidth() int {
+	previewWidth := m.width - ListPaneWidth - BorderPadding
+	if previewWidth < MinPreviewWidth {
+		previewWidth = MinPreviewWidth
+	}
+	return previewWidth
+}
+
+// calculateTmuxDimensions returns the width and height for the tmux pane
+func (m *Model) calculateTmuxDimensions() (width, height int) {
+	return m.calculatePreviewWidth() - TmuxWidthOffset, m.height - HeightOffset
+}
+
 // resizeSelectedPane resizes the currently selected instance's tmux pane
 func (m *Model) resizeSelectedPane() {
 	if len(m.instances) > 0 && m.cursor < len(m.instances) {
 		inst := m.instances[m.cursor]
-		previewWidth := m.width - 45 - 3
-		if previewWidth < 40 {
-			previewWidth = 40
+		tmuxWidth, tmuxHeight := m.calculateTmuxDimensions()
+		inst.ResizePane(tmuxWidth, tmuxHeight)
+	}
+}
+
+// getMaxColorItems returns the maximum number of color options based on current mode
+func (m *Model) getMaxColorItems() int {
+	if m.colorMode == 1 {
+		return len(colorOptions) - GradientColorCount
+	}
+	return len(colorOptions)
+}
+
+// handleMoveSessionUp moves the selected session up in the list
+func (m *Model) handleMoveSessionUp() {
+	if m.cursor > 0 && len(m.instances) > 1 {
+		m.instances[m.cursor], m.instances[m.cursor-1] = m.instances[m.cursor-1], m.instances[m.cursor]
+		m.cursor--
+		m.storage.SaveAll(m.instances)
+	}
+}
+
+// handleMoveSessionDown moves the selected session down in the list
+func (m *Model) handleMoveSessionDown() {
+	if m.cursor < len(m.instances)-1 {
+		m.instances[m.cursor], m.instances[m.cursor+1] = m.instances[m.cursor+1], m.instances[m.cursor]
+		m.cursor++
+		m.storage.SaveAll(m.instances)
+	}
+}
+
+// handleEnterSession starts (if needed) and attaches to the selected session
+func (m *Model) handleEnterSession() tea.Cmd {
+	if len(m.instances) == 0 {
+		return nil
+	}
+	inst := m.instances[m.cursor]
+	if inst.Status != session.StatusRunning {
+		if err := inst.Start(); err != nil {
+			m.err = err
+			return nil
 		}
-		tmuxWidth := previewWidth - 2 // Slightly narrower to avoid line wrapping
-		inst.ResizePane(tmuxWidth, m.height-8)
+		m.storage.UpdateInstance(inst)
+	}
+	sessionName := inst.TmuxSessionName()
+	// Configure tmux for proper terminal resize following
+	if err := exec.Command("tmux", "set-option", "-t", sessionName, "window-size", "largest").Run(); err != nil {
+		m.err = fmt.Errorf("failed to set tmux window-size: %w", err)
+	}
+	if err := exec.Command("tmux", "set-option", "-t", sessionName, "aggressive-resize", "on").Run(); err != nil {
+		m.err = fmt.Errorf("failed to set tmux aggressive-resize: %w", err)
+	}
+	// Enable focus events for hooks to work
+	exec.Command("tmux", "set-option", "-t", sessionName, "focus-events", "on").Run()
+	// Set up hook to resize window on focus gain (fixes Konsole tab switch issue)
+	exec.Command("tmux", "set-hook", "-t", sessionName, "client-focus-in", "resize-window -A").Run()
+	exec.Command("tmux", "set-hook", "-t", sessionName, "pane-focus-in", "resize-window -A").Run()
+	// Set up Ctrl+Q to resize to preview size before detach
+	tmuxWidth, tmuxHeight := m.calculateTmuxDimensions()
+	inst.UpdateDetachBinding(tmuxWidth, tmuxHeight)
+	inst.ClosePty()
+	cmd := exec.Command("tmux", "attach-session", "-t", sessionName)
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+		return reattachMsg{}
+	})
+}
+
+// handleResumeSession shows Claude sessions for the current instance
+func (m *Model) handleResumeSession() error {
+	if len(m.instances) == 0 {
+		return nil
+	}
+	inst := m.instances[m.cursor]
+	sessions, err := session.ListClaudeSessions(inst.Path)
+	if err != nil {
+		return err
+	}
+	if len(sessions) == 0 {
+		return fmt.Errorf("no previous Claude sessions found for this path")
+	}
+	m.claudeSessions = sessions
+	m.sessionCursor = 0
+	m.state = stateSelectClaudeSession
+	return nil
+}
+
+// handleStartSession starts the selected session without attaching
+func (m *Model) handleStartSession() {
+	if len(m.instances) == 0 {
+		return
+	}
+	inst := m.instances[m.cursor]
+	if inst.Status != session.StatusRunning {
+		if err := inst.Start(); err != nil {
+			m.err = err
+		} else {
+			m.storage.UpdateInstance(inst)
+		}
+	}
+}
+
+// handleStopSession stops the selected session
+func (m *Model) handleStopSession() {
+	if len(m.instances) == 0 {
+		return
+	}
+	inst := m.instances[m.cursor]
+	if inst.Status == session.StatusRunning {
+		inst.Stop()
+		m.storage.UpdateInstance(inst)
+	}
+}
+
+// handleRenameSession opens the rename dialog for the selected session
+func (m *Model) handleRenameSession() tea.Cmd {
+	if len(m.instances) == 0 {
+		return nil
+	}
+	inst := m.instances[m.cursor]
+	m.nameInput.SetValue(inst.Name)
+	m.nameInput.Focus()
+	m.state = stateRename
+	return textinput.Blink
+}
+
+// handleColorPicker opens the color picker for the selected session
+func (m *Model) handleColorPicker() {
+	if len(m.instances) == 0 {
+		return
+	}
+	inst := m.instances[m.cursor]
+	// Initialize preview colors
+	m.previewFg = inst.Color
+	m.previewBg = inst.BgColor
+	m.colorMode = 0
+	// Find current color index
+	m.colorCursor = 0
+	for i, c := range colorOptions {
+		if c.Color == inst.Color || c.Name == inst.Color {
+			m.colorCursor = i
+			break
+		}
+	}
+	m.state = stateColorPicker
+}
+
+// handleSendPrompt opens the prompt input for the selected session
+func (m *Model) handleSendPrompt() {
+	if len(m.instances) == 0 {
+		return
+	}
+	inst := m.instances[m.cursor]
+	if inst.Status != session.StatusRunning {
+		m.err = fmt.Errorf("session not running")
+		return
+	}
+	m.promptInput.SetValue("")
+	inputWidth := PromptMinWidth
+	if m.width > 80 {
+		inputWidth = m.width/2 - 10
+	}
+	if inputWidth > PromptMaxWidth {
+		inputWidth = PromptMaxWidth
+	}
+	m.promptInput.Width = inputWidth
+	m.promptInput.Focus()
+	m.state = statePrompt
+}
+
+// handleForceResize forces resize of the selected pane
+func (m *Model) handleForceResize() {
+	if len(m.instances) == 0 || m.cursor >= len(m.instances) {
+		return
+	}
+	inst := m.instances[m.cursor]
+	tmuxWidth, tmuxHeight := m.calculateTmuxDimensions()
+	if err := inst.ResizePane(tmuxWidth, tmuxHeight); err != nil {
+		m.err = fmt.Errorf("failed to resize pane: %w", err)
 	}
 }
 
@@ -361,50 +567,14 @@ func (m Model) handleListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "shift+up", "K":
-		// Move session up
-		if m.cursor > 0 && len(m.instances) > 1 {
-			m.instances[m.cursor], m.instances[m.cursor-1] = m.instances[m.cursor-1], m.instances[m.cursor]
-			m.cursor--
-			m.storage.SaveAll(m.instances)
-		}
+		m.handleMoveSessionUp()
 
 	case "shift+down", "J":
-		// Move session down
-		if m.cursor < len(m.instances)-1 {
-			m.instances[m.cursor], m.instances[m.cursor+1] = m.instances[m.cursor+1], m.instances[m.cursor]
-			m.cursor++
-			m.storage.SaveAll(m.instances)
-		}
+		m.handleMoveSessionDown()
 
 	case "enter":
-		if len(m.instances) > 0 {
-			inst := m.instances[m.cursor]
-			if inst.Status != session.StatusRunning {
-				// Start first
-				if err := inst.Start(); err != nil {
-					m.err = err
-					return m, nil
-				}
-				m.storage.UpdateInstance(inst)
-			}
-			sessionName := inst.TmuxSessionName()
-			// Ensure window-size is set to latest for proper terminal resize following
-			exec.Command("tmux", "set-option", "-t", sessionName, "window-size", "latest").Run()
-			exec.Command("tmux", "set-option", "-t", sessionName, "aggressive-resize", "on").Run()
-			// Set up Ctrl+Q to resize to preview size before detach
-			previewWidth := m.width - 45 - 3
-			if previewWidth < 40 {
-				previewWidth = 40
-			}
-			tmuxWidth := previewWidth - 2 // Slightly narrower to avoid line wrapping
-			inst.UpdateDetachBinding(tmuxWidth, m.height-8)
-			// Close PTY so tmux can follow terminal size during attach
-			inst.ClosePty()
-			// Attach using tmux attach-session
-			cmd := exec.Command("tmux", "attach-session", "-t", sessionName)
-			return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
-				return reattachMsg{}
-			})
+		if cmd := m.handleEnterSession(); cmd != nil {
+			return m, cmd
 		}
 
 	case "n":
@@ -414,43 +584,15 @@ func (m Model) handleListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, textinput.Blink
 
 	case "r":
-		// Resume: show Claude sessions for current instance
-		if len(m.instances) > 0 {
-			inst := m.instances[m.cursor]
-			sessions, err := session.ListClaudeSessions(inst.Path)
-			if err != nil {
-				m.err = err
-				return m, nil
-			}
-			if len(sessions) == 0 {
-				m.err = fmt.Errorf("no previous Claude sessions found for this path")
-				return m, nil
-			}
-			m.claudeSessions = sessions
-			m.sessionCursor = 0
-			m.state = stateSelectClaudeSession
+		if err := m.handleResumeSession(); err != nil {
+			m.err = err
 		}
 
 	case "s":
-		if len(m.instances) > 0 {
-			inst := m.instances[m.cursor]
-			if inst.Status != session.StatusRunning {
-				if err := inst.Start(); err != nil {
-					m.err = err
-				} else {
-					m.storage.UpdateInstance(inst)
-				}
-			}
-		}
+		m.handleStartSession()
 
 	case "x":
-		if len(m.instances) > 0 {
-			inst := m.instances[m.cursor]
-			if inst.Status == session.StatusRunning {
-				inst.Stop()
-				m.storage.UpdateInstance(inst)
-			}
-		}
+		m.handleStopSession()
 
 	case "d":
 		if len(m.instances) > 0 {
@@ -462,77 +604,24 @@ func (m Model) handleListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.autoYes = !m.autoYes
 
 	case "e":
-		// Rename session
-		if len(m.instances) > 0 {
-			inst := m.instances[m.cursor]
-			m.nameInput.SetValue(inst.Name)
-			m.nameInput.Focus()
-			m.state = stateRename
-			return m, textinput.Blink
+		if cmd := m.handleRenameSession(); cmd != nil {
+			return m, cmd
 		}
 
 	case "?":
 		m.state = stateHelp
 
 	case "c":
-		// Color picker
-		if len(m.instances) > 0 {
-			inst := m.instances[m.cursor]
-			// Initialize preview colors
-			m.previewFg = inst.Color
-			m.previewBg = inst.BgColor
-			m.colorMode = 0
-			// Find current color index
-			m.colorCursor = 0
-			for i, c := range colorOptions {
-				if c.Color == inst.Color || c.Name == inst.Color {
-					m.colorCursor = i
-					break
-				}
-			}
-			m.state = stateColorPicker
-		}
+		m.handleColorPicker()
 
 	case "l":
-		// Toggle compact list (no spacing between sessions)
 		m.compactList = !m.compactList
 
 	case "p":
-		// Send prompt to session (single line)
-		if len(m.instances) > 0 {
-			inst := m.instances[m.cursor]
-			if inst.Status == session.StatusRunning {
-				m.promptInput.SetValue("")
-				// Set width for the input field
-				inputWidth := 50
-				if m.width > 80 {
-					inputWidth = m.width/2 - 10
-				}
-				if inputWidth > 70 {
-					inputWidth = 70
-				}
-				m.promptInput.Width = inputWidth
-				m.promptInput.Focus()
-				m.state = statePrompt
-				return m, nil
-			} else {
-				m.err = fmt.Errorf("session not running")
-			}
-		}
+		m.handleSendPrompt()
 
 	case "R":
-		// Force resize selected pane
-		if len(m.instances) > 0 && m.cursor < len(m.instances) {
-			inst := m.instances[m.cursor]
-			previewWidth := m.width - 45 - 3
-			if previewWidth < 40 {
-				previewWidth = 40
-			}
-			tmuxWidth := previewWidth - 2 // Slightly narrower to avoid line wrapping
-			if err := inst.ResizePane(tmuxWidth, m.height-8); err != nil {
-				m.err = err
-			}
-		}
+		m.handleForceResize()
 	}
 
 	return m, nil
@@ -554,7 +643,11 @@ func (m Model) handleNewNameKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 
 			// Check for existing Claude sessions
-			sessions, _ := session.ListClaudeSessions(inst.Path)
+			sessions, err := session.ListClaudeSessions(inst.Path)
+			if err != nil {
+				// Non-fatal: just continue without session selection
+				sessions = nil
+			}
 			if len(sessions) > 0 {
 				m.pendingInstance = inst
 				m.claudeSessions = sessions
@@ -712,10 +805,16 @@ func (m Model) handleConfirmDeleteKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y", "Y":
 		if m.deleteTarget != nil {
-			m.storage.RemoveInstance(m.deleteTarget.ID)
+			if err := m.storage.RemoveInstance(m.deleteTarget.ID); err != nil {
+				m.err = fmt.Errorf("failed to remove instance: %w", err)
+			}
 			// Reload instances
-			instances, _ := m.storage.Load()
-			m.instances = instances
+			instances, err := m.storage.Load()
+			if err != nil {
+				m.err = fmt.Errorf("failed to reload instances: %w", err)
+			} else {
+				m.instances = instances
+			}
 			if m.cursor >= len(m.instances) && m.cursor > 0 {
 				m.cursor--
 			}
@@ -786,14 +885,7 @@ func (m Model) handlePromptKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleColorPickerKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Calculate max items based on mode
-	// colorOptions has: none, auto, 22 solid colors, 15 gradients = 39 total
-	// For background: skip auto (index 1) and gradients (last 15)
-	maxItems := len(colorOptions)
-	if m.colorMode == 1 {
-		// Background mode - exclude gradients (last 15 items) and auto
-		maxItems = len(colorOptions) - 15
-	}
+	maxItems := m.getMaxColorItems()
 
 	switch msg.String() {
 	case "esc":
@@ -900,6 +992,8 @@ func (m Model) handleColorPickerKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// View implements tea.Model and renders the current UI state.
+// It returns different views based on the current application state.
 func (m Model) View() string {
 	switch m.state {
 	case stateHelp:
@@ -1039,8 +1133,8 @@ func interpolateColor(colors []string, position float64) string {
 	return fmt.Sprintf("#%02X%02X%02X", r, g, b)
 }
 
-// applyGradient applies a gradient to text, coloring each character
-func applyGradient(text string, gradientName string) string {
+// applyGradientText applies a gradient to text with optional background color and bold
+func applyGradientText(text, gradientName, bgColor string, bold bool) string {
 	colors, ok := gradients[gradientName]
 	if !ok || len(text) == 0 {
 		return text
@@ -1056,56 +1150,29 @@ func applyGradient(text string, gradientName string) string {
 		}
 		color := interpolateColor(colors, position)
 		style := lipgloss.NewStyle().Foreground(lipgloss.Color(color))
+		if bgColor != "" {
+			style = style.Background(lipgloss.Color(bgColor))
+		}
+		if bold {
+			style = style.Bold(true)
+		}
 		result.WriteString(style.Render(string(r)))
 	}
 
 	return result.String()
 }
 
-// applyGradientWithBg applies a gradient with background color
-func applyGradientWithBg(text string, gradientName string, bgColor string) string {
-	colors, ok := gradients[gradientName]
-	if !ok || len(text) == 0 {
-		return text
-	}
-
-	runes := []rune(text)
-	var result strings.Builder
-
-	for i, r := range runes {
-		position := float64(i) / float64(len(runes)-1)
-		if len(runes) == 1 {
-			position = 0.5
-		}
-		color := interpolateColor(colors, position)
-		style := lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Background(lipgloss.Color(bgColor))
-		result.WriteString(style.Render(string(r)))
-	}
-
-	return result.String()
+// Convenience wrappers for backward compatibility
+func applyGradient(text, gradientName string) string {
+	return applyGradientText(text, gradientName, "", false)
 }
 
-// applyGradientWithBgBold applies a gradient with background color and bold text
-func applyGradientWithBgBold(text string, gradientName string, bgColor string) string {
-	colors, ok := gradients[gradientName]
-	if !ok || len(text) == 0 {
-		return text
-	}
+func applyGradientWithBg(text, gradientName, bgColor string) string {
+	return applyGradientText(text, gradientName, bgColor, false)
+}
 
-	runes := []rune(text)
-	var result strings.Builder
-
-	for i, r := range runes {
-		position := float64(i) / float64(len(runes)-1)
-		if len(runes) == 1 {
-			position = 0.5
-		}
-		color := interpolateColor(colors, position)
-		style := lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Background(lipgloss.Color(bgColor)).Bold(true)
-		result.WriteString(style.Render(string(r)))
-	}
-
-	return result.String()
+func applyGradientWithBgBold(text, gradientName, bgColor string) string {
+	return applyGradientText(text, gradientName, bgColor, true)
 }
 
 // getContrastColor returns black or white based on background luminance
@@ -1172,19 +1239,169 @@ var (
 				Bold(true)
 )
 
-func (m Model) listView() string {
-	// Fixed width for left panel (sessions list)
-	listWidth := 45
-	previewWidth := m.width - listWidth - 3 // -3 for borders/padding
-	if previewWidth < 40 {
-		previewWidth = 40
-	}
-	contentHeight := m.height - 1 // Reserve space for status bar
-	if contentHeight < 10 {
-		contentHeight = 10
+// renderSessionRow renders a single session row with all color and style logic
+func (m Model) renderSessionRow(inst *session.Instance, index int, listWidth int) string {
+	var row strings.Builder
+
+	// Status indicator based on activity
+	var status string
+	if inst.Status == session.StatusRunning {
+		if m.isActive[inst.ID] {
+			status = activeStyle.Render("●") // Orange - active
+		} else {
+			status = idleStyle.Render("●") // Grey - idle/waiting
+		}
+	} else {
+		status = stoppedStyle.Render("○") // Red outline - stopped
 	}
 
-	// Build left pane (session list)
+	// Truncate name to fit
+	name := inst.Name
+	maxNameLen := listWidth - 6
+	if maxNameLen < 10 {
+		maxNameLen = 10
+	}
+	if len(name) > maxNameLen {
+		name = name[:maxNameLen-2] + "…"
+	}
+
+	// Apply session colors
+	styledName := m.getStyledName(inst, name)
+	selected := index == m.cursor
+
+	// Render the row
+	if selected {
+		row.WriteString(m.renderSelectedRow(inst, name, styledName, status, listWidth))
+	} else {
+		row.WriteString(m.renderUnselectedRow(inst, name, styledName, status, listWidth))
+	}
+	row.WriteString("\n")
+
+	// Show last output line
+	lastLine := m.getLastLine(inst)
+	row.WriteString(fmt.Sprintf("     └─ %s", lastLine))
+	row.WriteString("\n")
+
+	if !m.compactList {
+		row.WriteString("\n")
+	}
+
+	return row.String()
+}
+
+// getStyledName applies color styling to a session name
+func (m Model) getStyledName(inst *session.Instance, name string) string {
+	style := lipgloss.NewStyle()
+
+	// Apply background color first
+	if inst.BgColor != "" {
+		style = style.Background(lipgloss.Color(inst.BgColor))
+	}
+
+	// Apply foreground color
+	if inst.Color != "" {
+		if inst.Color == "auto" && inst.BgColor != "" {
+			autoColor := getContrastColor(inst.BgColor)
+			style = style.Foreground(lipgloss.Color(autoColor))
+			return style.Render(name)
+		} else if _, isGradient := gradients[inst.Color]; isGradient {
+			if inst.BgColor != "" {
+				return applyGradientWithBg(name, inst.Color, inst.BgColor)
+			}
+			return applyGradient(name, inst.Color)
+		}
+		style = style.Foreground(lipgloss.Color(inst.Color))
+		return style.Render(name)
+	} else if inst.BgColor != "" {
+		autoColor := getContrastColor(inst.BgColor)
+		style = style.Foreground(lipgloss.Color(autoColor))
+		return style.Render(name)
+	}
+
+	return name
+}
+
+// renderSelectedRow renders a selected session row
+func (m Model) renderSelectedRow(inst *session.Instance, name, styledName, status string, listWidth int) string {
+	if inst.FullRowColor && inst.BgColor != "" {
+		if _, isGradient := gradients[inst.Color]; isGradient {
+			padding := listWidth - 7 - len([]rune(name))
+			paddingStr := ""
+			if padding > 0 {
+				paddingStr = lipgloss.NewStyle().Background(lipgloss.Color(inst.BgColor)).Render(strings.Repeat(" ", padding))
+			}
+			gradientText := applyGradientWithBgBold(name, inst.Color, inst.BgColor)
+			return fmt.Sprintf(" %s %s %s%s", listSelectedStyle.Render("▸"), status, gradientText, paddingStr)
+		}
+		rowStyle := lipgloss.NewStyle().Background(lipgloss.Color(inst.BgColor)).Bold(true)
+		if inst.Color == "auto" || inst.Color == "" {
+			rowStyle = rowStyle.Foreground(lipgloss.Color(getContrastColor(inst.BgColor)))
+		} else {
+			rowStyle = rowStyle.Foreground(lipgloss.Color(inst.Color))
+		}
+		textPart := name
+		padding := listWidth - 7 - len([]rune(name))
+		if padding > 0 {
+			textPart += strings.Repeat(" ", padding)
+		}
+		return fmt.Sprintf(" %s %s %s", listSelectedStyle.Render("▸"), status, rowStyle.Render(textPart))
+	} else if inst.Color != "" || inst.BgColor != "" {
+		return fmt.Sprintf(" %s %s %s", listSelectedStyle.Render("▸"), status, lipgloss.NewStyle().Bold(true).Render(styledName))
+	}
+	return fmt.Sprintf(" %s %s %s", listSelectedStyle.Render("▸"), status, lipgloss.NewStyle().Bold(true).Render(name))
+}
+
+// renderUnselectedRow renders an unselected session row
+func (m Model) renderUnselectedRow(inst *session.Instance, name, styledName, status string, listWidth int) string {
+	if inst.FullRowColor && inst.BgColor != "" {
+		if _, isGradient := gradients[inst.Color]; isGradient {
+			padding := listWidth - 7 - len([]rune(name))
+			paddingStr := ""
+			if padding > 0 {
+				paddingStr = lipgloss.NewStyle().Background(lipgloss.Color(inst.BgColor)).Render(strings.Repeat(" ", padding))
+			}
+			gradientText := applyGradientWithBg(name, inst.Color, inst.BgColor)
+			return fmt.Sprintf("   %s %s%s", status, gradientText, paddingStr)
+		}
+		rowStyle := lipgloss.NewStyle().Background(lipgloss.Color(inst.BgColor))
+		if inst.Color == "auto" || inst.Color == "" {
+			rowStyle = rowStyle.Foreground(lipgloss.Color(getContrastColor(inst.BgColor)))
+		} else {
+			rowStyle = rowStyle.Foreground(lipgloss.Color(inst.Color))
+		}
+		textPart := name
+		padding := listWidth - 7 - len([]rune(name))
+		if padding > 0 {
+			textPart += strings.Repeat(" ", padding)
+		}
+		return fmt.Sprintf("   %s %s", status, rowStyle.Render(textPart))
+	}
+	return fmt.Sprintf("   %s %s", status, styledName)
+}
+
+// getLastLine returns the last line of output for a session
+func (m Model) getLastLine(inst *session.Instance) string {
+	lastLine := m.lastLines[inst.ID]
+	if lastLine == "" {
+		if inst.Status == session.StatusRunning {
+			return "loading..."
+		}
+		return "stopped"
+	}
+	// Truncate to prevent line wrap
+	cleanLine := strings.TrimSpace(stripANSI(lastLine))
+	maxLen := ListPaneWidth - 10 // Account for "     └─ " prefix
+	if maxLen < 10 {
+		maxLen = 10
+	}
+	if len(cleanLine) > maxLen {
+		return cleanLine[:maxLen-3] + "..."
+	}
+	return cleanLine
+}
+
+// buildSessionListPane builds the left pane containing the session list
+func (m Model) buildSessionListPane(listWidth, contentHeight int) string {
 	var leftPane strings.Builder
 	leftPane.WriteString("\n")
 	leftPane.WriteString(titleStyle.Render(" Sessions "))
@@ -1193,243 +1410,133 @@ func (m Model) listView() string {
 	if len(m.instances) == 0 {
 		leftPane.WriteString(" No sessions\n")
 		leftPane.WriteString(dimStyle.Render(" Press 'n' to create"))
-	} else {
-		// Calculate visible range (each session takes 2 or 3 lines depending on compact mode)
-		linesPerSession := 2
-		if !m.compactList {
-			linesPerSession = 3
-		}
-		maxVisible := (contentHeight - 4) / linesPerSession
-		if maxVisible < 3 {
-			maxVisible = 3
-		}
-
-		startIdx := 0
-		if m.cursor >= maxVisible {
-			startIdx = m.cursor - maxVisible + 1
-		}
-		endIdx := startIdx + maxVisible
-		if endIdx > len(m.instances) {
-			endIdx = len(m.instances)
-		}
-
-		// Show scroll indicator at top
-		if startIdx > 0 {
-			leftPane.WriteString(dimStyle.Render(fmt.Sprintf("  ↑ %d more\n", startIdx)))
-		}
-
-		for i := startIdx; i < endIdx; i++ {
-			inst := m.instances[i]
-			// Status indicator based on activity
-			var status string
-			if inst.Status == session.StatusRunning {
-				if m.isActive[inst.ID] {
-					status = activeStyle.Render("●") // Orange - active
-				} else {
-					status = idleStyle.Render("●") // Grey - idle/waiting
-				}
-			} else {
-				status = stoppedStyle.Render("○") // Red outline - stopped
-			}
-
-			// Truncate name to fit
-			name := inst.Name
-			maxNameLen := listWidth - 6
-			if maxNameLen < 10 {
-				maxNameLen = 10
-			}
-			if len(name) > maxNameLen {
-				name = name[:maxNameLen-2] + "…"
-			}
-
-			// Apply session colors
-			styledName := name
-			style := lipgloss.NewStyle()
-
-			// Apply background color first
-			if inst.BgColor != "" {
-				style = style.Background(lipgloss.Color(inst.BgColor))
-			}
-
-			// Apply foreground color
-			if inst.Color != "" {
-				if inst.Color == "auto" && inst.BgColor != "" {
-					// Auto mode: calculate contrast color
-					autoColor := getContrastColor(inst.BgColor)
-					style = style.Foreground(lipgloss.Color(autoColor))
-					styledName = style.Render(name)
-				} else if _, isGradient := gradients[inst.Color]; isGradient {
-					// Gradient - apply to each character
-					if inst.BgColor != "" {
-						styledName = applyGradientWithBg(name, inst.Color, inst.BgColor)
-					} else {
-						styledName = applyGradient(name, inst.Color)
-					}
-				} else {
-					style = style.Foreground(lipgloss.Color(inst.Color))
-					styledName = style.Render(name)
-				}
-			} else if inst.BgColor != "" {
-				// Only background, use auto text color
-				autoColor := getContrastColor(inst.BgColor)
-				style = style.Foreground(lipgloss.Color(autoColor))
-				styledName = style.Render(name)
-			}
-
-			// Selected row is always bold
-			if i == m.cursor {
-				if inst.FullRowColor && inst.BgColor != "" {
-					// Full row background
-					if _, isGradient := gradients[inst.Color]; isGradient {
-						// Gradient text on full row background
-						padding := listWidth - 7 - len([]rune(name))
-						paddingStr := ""
-						if padding > 0 {
-							paddingStr = lipgloss.NewStyle().Background(lipgloss.Color(inst.BgColor)).Render(strings.Repeat(" ", padding))
-						}
-						gradientText := applyGradientWithBgBold(name, inst.Color, inst.BgColor)
-						leftPane.WriteString(fmt.Sprintf(" %s %s %s%s", listSelectedStyle.Render("▸"), status, gradientText, paddingStr))
-					} else {
-						rowStyle := lipgloss.NewStyle().Background(lipgloss.Color(inst.BgColor)).Bold(true)
-						if inst.Color == "auto" || inst.Color == "" {
-							rowStyle = rowStyle.Foreground(lipgloss.Color(getContrastColor(inst.BgColor)))
-						} else {
-							rowStyle = rowStyle.Foreground(lipgloss.Color(inst.Color))
-						}
-						textPart := name
-						padding := listWidth - 7 - len([]rune(name))
-						if padding > 0 {
-							textPart += strings.Repeat(" ", padding)
-						}
-						leftPane.WriteString(fmt.Sprintf(" %s %s %s", listSelectedStyle.Render("▸"), status, rowStyle.Render(textPart)))
-					}
-				} else if inst.Color != "" || inst.BgColor != "" {
-					leftPane.WriteString(fmt.Sprintf(" %s %s %s", listSelectedStyle.Render("▸"), status, lipgloss.NewStyle().Bold(true).Render(styledName)))
-				} else {
-					leftPane.WriteString(fmt.Sprintf(" %s %s %s", listSelectedStyle.Render("▸"), status, lipgloss.NewStyle().Bold(true).Render(name)))
-				}
-			} else {
-				if inst.FullRowColor && inst.BgColor != "" {
-					// Full row background
-					if _, isGradient := gradients[inst.Color]; isGradient {
-						// Gradient text on full row background
-						padding := listWidth - 7 - len([]rune(name))
-						paddingStr := ""
-						if padding > 0 {
-							paddingStr = lipgloss.NewStyle().Background(lipgloss.Color(inst.BgColor)).Render(strings.Repeat(" ", padding))
-						}
-						gradientText := applyGradientWithBg(name, inst.Color, inst.BgColor)
-						leftPane.WriteString(fmt.Sprintf("   %s %s%s", status, gradientText, paddingStr))
-					} else {
-						rowStyle := lipgloss.NewStyle().Background(lipgloss.Color(inst.BgColor))
-						if inst.Color == "auto" || inst.Color == "" {
-							rowStyle = rowStyle.Foreground(lipgloss.Color(getContrastColor(inst.BgColor)))
-						} else {
-							rowStyle = rowStyle.Foreground(lipgloss.Color(inst.Color))
-						}
-						textPart := name
-						padding := listWidth - 7 - len([]rune(name))
-						if padding > 0 {
-							textPart += strings.Repeat(" ", padding)
-						}
-						leftPane.WriteString(fmt.Sprintf("   %s %s", status, rowStyle.Render(textPart)))
-					}
-				} else {
-					leftPane.WriteString(fmt.Sprintf("   %s %s", status, styledName))
-				}
-			}
-			leftPane.WriteString("\n")
-
-			// Show last output line for all sessions
-			lastLine := m.lastLines[inst.ID]
-			if lastLine == "" {
-				if inst.Status == session.StatusRunning {
-					lastLine = "loading..."
-				} else {
-					lastLine = "stopped"
-				}
-			}
-			// Truncate to prevent line wrap (strip ANSI for length check)
-			cleanLine := strings.TrimSpace(stripANSI(lastLine))
-			maxLen := listWidth - 10 // Account for "     └─ " prefix
-			if maxLen < 10 {
-				maxLen = 10
-			}
-			if len(cleanLine) > maxLen {
-				// Truncate the original line (keeping colors is tricky, so use clean version)
-				lastLine = cleanLine[:maxLen-3] + "..."
-			} else {
-				lastLine = cleanLine
-			}
-			leftPane.WriteString(fmt.Sprintf("     └─ %s", lastLine))
-			leftPane.WriteString("\n")
-			if !m.compactList {
-				leftPane.WriteString("\n")
-			}
-		}
-
-		// Show scroll indicator at bottom
-		remaining := len(m.instances) - endIdx
-		if remaining > 0 {
-			leftPane.WriteString(dimStyle.Render(fmt.Sprintf("  ↓ %d more\n", remaining)))
-		}
+		return leftPane.String()
 	}
 
-	// Build right pane (preview)
+	// Calculate visible range
+	linesPerSession := 2
+	if !m.compactList {
+		linesPerSession = 3
+	}
+	maxVisible := (contentHeight - 4) / linesPerSession
+	if maxVisible < 3 {
+		maxVisible = 3
+	}
+
+	startIdx := 0
+	if m.cursor >= maxVisible {
+		startIdx = m.cursor - maxVisible + 1
+	}
+	endIdx := startIdx + maxVisible
+	if endIdx > len(m.instances) {
+		endIdx = len(m.instances)
+	}
+
+	// Show scroll indicator at top
+	if startIdx > 0 {
+		leftPane.WriteString(dimStyle.Render(fmt.Sprintf("  ↑ %d more\n", startIdx)))
+	}
+
+	for i := startIdx; i < endIdx; i++ {
+		leftPane.WriteString(m.renderSessionRow(m.instances[i], i, listWidth))
+	}
+
+	// Show scroll indicator at bottom
+	remaining := len(m.instances) - endIdx
+	if remaining > 0 {
+		leftPane.WriteString(dimStyle.Render(fmt.Sprintf("  ↓ %d more\n", remaining)))
+	}
+
+	return leftPane.String()
+}
+
+// buildPreviewPane builds the right pane containing the preview
+func (m Model) buildPreviewPane(contentHeight int) string {
 	var rightPane strings.Builder
 	rightPane.WriteString("\n")
 	rightPane.WriteString(titleStyle.Render(" Preview "))
 	rightPane.WriteString("\n\n")
 
-	if len(m.instances) > 0 && m.cursor < len(m.instances) {
-		inst := m.instances[m.cursor]
-		// Instance info
-		rightPane.WriteString(dimStyle.Render(fmt.Sprintf("  Path: %s", inst.Path)))
-		rightPane.WriteString("\n")
-		if inst.ResumeSessionID != "" {
-			rightPane.WriteString(dimStyle.Render(fmt.Sprintf("  Resume: %s", inst.ResumeSessionID[:8])))
-			rightPane.WriteString("\n")
-		}
-		rightPane.WriteString("\n")
-
-		// Preview content
-		if m.preview != "" {
-			lines := strings.Split(m.preview, "\n")
-
-			// No filtering needed - we capture visible pane only (like Claude Squad)
-			filteredLines := lines
-
-			// Show last N lines - simple limit (account for header: title, path, spacing)
-			maxLines := contentHeight - 6
-			if maxLines < 5 {
-				maxLines = 5
-			}
-			startIdx := len(filteredLines) - maxLines
-			if startIdx < 0 {
-				startIdx = 0
-			}
-			if startIdx > 0 {
-				rightPane.WriteString(dimStyle.Render("   ..."))
-				rightPane.WriteString("\n")
-			}
-			for i := startIdx; i < len(filteredLines); i++ {
-				rightPane.WriteString("  " + filteredLines[i] + "\x1b[0m\n")
-			}
-		} else {
-			rightPane.WriteString(dimStyle.Render("  (no output yet)"))
-		}
+	if len(m.instances) == 0 || m.cursor >= len(m.instances) {
+		return rightPane.String()
 	}
+
+	inst := m.instances[m.cursor]
+
+	// Instance info
+	rightPane.WriteString(dimStyle.Render(fmt.Sprintf("  Path: %s", inst.Path)))
+	rightPane.WriteString("\n")
+	if inst.ResumeSessionID != "" {
+		rightPane.WriteString(dimStyle.Render(fmt.Sprintf("  Resume: %s", inst.ResumeSessionID[:8])))
+		rightPane.WriteString("\n")
+	}
+	rightPane.WriteString("\n")
+
+	// Preview content
+	if m.preview == "" {
+		rightPane.WriteString(dimStyle.Render("  (no output yet)"))
+		return rightPane.String()
+	}
+
+	lines := strings.Split(m.preview, "\n")
+	maxLines := contentHeight - PreviewHeaderHeight
+	if maxLines < MinPreviewLines {
+		maxLines = MinPreviewLines
+	}
+	startIdx := len(lines) - maxLines
+	if startIdx < 0 {
+		startIdx = 0
+	}
+	if startIdx > 0 {
+		rightPane.WriteString(dimStyle.Render("   ..."))
+		rightPane.WriteString("\n")
+	}
+	for i := startIdx; i < len(lines); i++ {
+		rightPane.WriteString("  " + lines[i] + "\x1b[0m\n")
+	}
+
+	return rightPane.String()
+}
+
+// buildStatusBar builds the status bar at the bottom
+func (m Model) buildStatusBar() string {
+	autoYesIndicator := "OFF"
+	if m.autoYes {
+		autoYesIndicator = "ON"
+	}
+	compactIndicator := "OFF"
+	if m.compactList {
+		compactIndicator = "ON"
+	}
+	statusText := helpStyle.Render(fmt.Sprintf(
+		"n:new  r:resume  p:prompt  e:rename  s:start  x:stop  d:delete  c:color  l:compact[%s]  y:autoyes[%s]  ?:help  q:quit",
+		compactIndicator, autoYesIndicator,
+	))
+	return "\n" + lipgloss.PlaceHorizontal(m.width, lipgloss.Center, statusText)
+}
+
+func (m Model) listView() string {
+	listWidth := ListPaneWidth
+	previewWidth := m.calculatePreviewWidth()
+	contentHeight := m.height - 1
+	if contentHeight < MinContentHeight {
+		contentHeight = MinContentHeight
+	}
+
+	// Build panes using helper methods
+	leftPane := m.buildSessionListPane(listWidth, contentHeight)
+	rightPane := m.buildPreviewPane(contentHeight)
 
 	// Style the panes with borders
 	leftStyled := listPaneStyle.
 		Width(listWidth).
 		Height(contentHeight).
-		Render(leftPane.String())
+		Render(leftPane)
 
 	rightStyled := previewPaneStyle.
 		Width(previewWidth).
 		Height(contentHeight).
-		Render(rightPane.String())
+		Render(rightPane)
 
 	// Join panes horizontally
 	content := lipgloss.JoinHorizontal(lipgloss.Top, leftStyled, rightStyled)
@@ -1444,20 +1551,7 @@ func (m Model) listView() string {
 	}
 
 	// Status bar
-	autoYesIndicator := "OFF"
-	if m.autoYes {
-		autoYesIndicator = "ON"
-	}
-	compactIndicator := "OFF"
-	if m.compactList {
-		compactIndicator = "ON"
-	}
-	b.WriteString("\n")
-	statusText := helpStyle.Render(fmt.Sprintf(
-		"n:new  r:resume  p:prompt  e:rename  s:start  x:stop  d:delete  c:color  l:compact[%s]  y:autoyes[%s]  ?:help  q:quit",
-		compactIndicator, autoYesIndicator,
-	))
-	b.WriteString(lipgloss.PlaceHorizontal(m.width, lipgloss.Center, statusText))
+	b.WriteString(m.buildStatusBar())
 
 	return b.String()
 }
@@ -1500,8 +1594,8 @@ func (m Model) selectSessionView() string {
 	b.WriteString(searchBoxStyle.Width(boxWidth).Render("⌕ Search…"))
 	b.WriteString("\n\n")
 
-	// Calculate visible window (show max 8 items)
-	maxVisible := 8
+	// Calculate visible window
+	maxVisible := SessionListMaxItems
 	startIdx := 0
 	if m.sessionCursor > maxVisible-2 {
 		startIdx = m.sessionCursor - maxVisible + 2
@@ -1831,15 +1925,12 @@ func (m Model) colorPickerView() string {
 	}
 
 	// Calculate max items based on mode
-	maxItems := len(colorOptions)
-	if m.colorMode == 1 {
-		maxItems = len(colorOptions) - 15 // No gradients for background
-	}
+	maxItems := m.getMaxColorItems()
 
 	// Calculate visible window
-	maxVisible := m.height - 12
-	if maxVisible < 5 {
-		maxVisible = 5
+	maxVisible := m.height - ColorPickerHeader
+	if maxVisible < MinColorPickerRows {
+		maxVisible = MinColorPickerRows
 	}
 
 	startIdx := 0
