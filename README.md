@@ -16,6 +16,7 @@ A powerful terminal UI (TUI) application for managing multiple Claude Code insta
 - **Session Reordering** - Organize sessions with keyboard shortcuts
 - **Compact Mode** - Toggle spacing between sessions for denser view
 - **Smart Resize** - Terminal resize follows when attached, preview size preserved when detached
+- **Overlay Dialogs** - Modal dialogs rendered over the main view with proper Unicode character width handling
 
 ## Installation
 
@@ -147,7 +148,7 @@ claude-session-manager/
     ├── views.go         # View rendering functions
     ├── colors.go        # Color definitions & gradients
     ├── styles.go        # Lipgloss style definitions
-    └── helpers.go       # ANSI & string utilities
+    └── helpers.go       # ANSI utilities & overlay dialog rendering
 ```
 
 ## Dependencies
@@ -156,6 +157,7 @@ claude-session-manager/
 - [Lip Gloss](https://github.com/charmbracelet/lipgloss) - Style definitions
 - [Bubbles](https://github.com/charmbracelet/bubbles) - TUI components
 - [creack/pty](https://github.com/creack/pty) - PTY handling for tmux resize control
+- [go-runewidth](https://github.com/mattn/go-runewidth) - Unicode character width calculation for overlay dialogs
 
 ## Contributing
 

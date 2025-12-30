@@ -114,42 +114,46 @@ func (m Model) helpView() string {
 	return b.String()
 }
 
-// confirmDeleteView renders the delete confirmation dialog
+// confirmDeleteView renders the delete confirmation dialog as an overlay
 func (m Model) confirmDeleteView() string {
-	var b strings.Builder
-
-	b.WriteString(titleStyle.Render(" Confirm Delete "))
-	b.WriteString("\n\n")
-
+	var boxContent strings.Builder
+	boxContent.WriteString("\n")
 	if m.deleteTarget != nil {
-		b.WriteString(fmt.Sprintf("  Delete session '%s'?\n\n", m.deleteTarget.Name))
+		boxContent.WriteString(fmt.Sprintf("  Delete session '%s'?\n\n", m.deleteTarget.Name))
 	}
+	boxContent.WriteString(helpStyle.Render("  y: yes  n: no"))
+	boxContent.WriteString("\n")
 
-	b.WriteString(helpStyle.Render("y: yes  n: no"))
-
-	return b.String()
+	return m.renderOverlayDialog(" Confirm Delete ", boxContent.String(), 40, "#FF5F87")
 }
 
-// newInstanceView renders the new session creation dialog
+// newInstanceView renders the new session creation dialog as an overlay
 func (m Model) newInstanceView() string {
-	var b strings.Builder
-
-	b.WriteString(titleStyle.Render(" New Session "))
-	b.WriteString("\n\n")
+	var boxContent strings.Builder
+	boxContent.WriteString("\n")
 
 	if m.state == stateNewPath {
-		b.WriteString("  Project Path:\n")
-		b.WriteString("  " + m.pathInput.View() + "\n")
+		boxContent.WriteString("  Project Path:\n")
+		boxContent.WriteString("  " + m.pathInput.View() + "\n")
 	} else {
-		b.WriteString(fmt.Sprintf("  Project Path: %s\n", m.pathInput.Value()))
-		b.WriteString("  Session Name:\n")
-		b.WriteString("  " + m.nameInput.View() + "\n")
+		boxContent.WriteString(fmt.Sprintf("  Path: %s\n\n", m.pathInput.Value()))
+		boxContent.WriteString("  Session Name:\n")
+		boxContent.WriteString("  " + m.nameInput.View() + "\n")
 	}
 
-	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("enter: confirm  esc: cancel"))
+	boxContent.WriteString("\n")
+	boxContent.WriteString(helpStyle.Render("  enter: confirm  esc: cancel"))
+	boxContent.WriteString("\n")
 
-	return b.String()
+	boxWidth := 60
+	if m.width > 80 {
+		boxWidth = m.width / 2
+	}
+	if boxWidth > 80 {
+		boxWidth = 80
+	}
+
+	return m.renderOverlayDialog(" New Session ", boxContent.String(), boxWidth, "#7D56F4")
 }
 
 // selectSessionView renders the Claude session selector
@@ -403,29 +407,35 @@ func (m Model) colorPickerView() string {
 	return b.String()
 }
 
-// renameView renders the rename dialog
+// renameView renders the rename dialog as an overlay
 func (m Model) renameView() string {
-	var b strings.Builder
+	var boxContent strings.Builder
+	boxContent.WriteString("\n")
 
-	b.WriteString(titleStyle.Render(" Rename Session "))
-	b.WriteString("\n\n")
+	if len(m.instances) > 0 {
+		inst := m.instances[m.cursor]
+		boxContent.WriteString(fmt.Sprintf("  Current: %s\n\n", inst.Name))
+	}
 
-	b.WriteString("  New Name:\n")
-	b.WriteString("  " + m.nameInput.View() + "\n")
+	boxContent.WriteString("  New Name:\n")
+	boxContent.WriteString("  " + m.nameInput.View() + "\n")
+	boxContent.WriteString("\n")
+	boxContent.WriteString(helpStyle.Render("  enter: confirm  esc: cancel"))
+	boxContent.WriteString("\n")
 
-	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("enter: confirm  esc: cancel"))
+	boxWidth := 50
+	if m.width > 80 {
+		boxWidth = m.width / 3
+	}
+	if boxWidth > 60 {
+		boxWidth = 60
+	}
 
-	return b.String()
+	return m.renderOverlayDialog(" Rename Session ", boxContent.String(), boxWidth, "#7D56F4")
 }
 
 // promptView renders the prompt input dialog overlaid on the list view
 func (m Model) promptView() string {
-	// Render the list view as background
-	background := m.listView()
-	bgLines := strings.Split(background, "\n")
-
-	// Build the prompt box content
 	var boxContent strings.Builder
 	boxContent.WriteString("\n")
 
@@ -439,7 +449,6 @@ func (m Model) promptView() string {
 	boxContent.WriteString(helpStyle.Render("  enter: send  esc: cancel"))
 	boxContent.WriteString("\n")
 
-	// Create the box style
 	boxWidth := 60
 	if m.width > 80 {
 		boxWidth = m.width / 2
@@ -448,51 +457,7 @@ func (m Model) promptView() string {
 		boxWidth = 80
 	}
 
-	promptBoxStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#7D56F4")).
-		Background(lipgloss.Color("#1a1a2e")).
-		Padding(0, 1).
-		Width(boxWidth)
-
-	box := promptBoxStyle.Render(titleStyle.Render(" Send Message ") + boxContent.String())
-	boxLines := strings.Split(box, "\n")
-
-	// Calculate position to center the box
-	boxHeight := len(boxLines)
-	startY := (m.height - boxHeight) / 2
-	startX := (m.width - boxWidth - 4) / 2 // -4 for border
-
-	// Overlay the box on the background
-	for i, boxLine := range boxLines {
-		bgY := startY + i
-		if bgY >= 0 && bgY < len(bgLines) {
-			// Get the background line
-			bgLine := bgLines[bgY]
-			bgRunes := []rune(stripANSI(bgLine))
-
-			// Build new line: left part of bg + box + right part of bg
-			var newLine strings.Builder
-
-			// Left part (before box)
-			if startX > 0 {
-				if len(bgRunes) >= startX {
-					newLine.WriteString(string(bgRunes[:startX]))
-				} else {
-					newLine.WriteString(string(bgRunes))
-					newLine.WriteString(strings.Repeat(" ", startX-len(bgRunes)))
-				}
-			}
-
-			// Box line
-			newLine.WriteString(boxLine)
-
-			// Right part (after box) - usually not needed as box fills to edge
-			bgLines[bgY] = newLine.String()
-		}
-	}
-
-	return strings.Join(bgLines, "\n")
+	return m.renderOverlayDialog(" Send Message ", boxContent.String(), boxWidth, "#7D56F4")
 }
 
 // renderSessionRow renders a single session row with all color and style logic
