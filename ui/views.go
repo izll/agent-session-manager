@@ -78,38 +78,143 @@ func (m Model) listView() string {
 func (m Model) helpView() string {
 	var b strings.Builder
 
-	b.WriteString(titleStyle.Render(" Help "))
+	// Styles
+	headerStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FAFAFA")).
+		Background(lipgloss.Color("#7D56F4")).
+		Bold(true).
+		Padding(0, 2).
+		MarginBottom(1)
+
+	sectionStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#7D56F4")).
+		Bold(true)
+
+	keyStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#1a1a2e")).
+		Background(lipgloss.Color("#7D56F4")).
+		Bold(true).
+		Padding(0, 1)
+
+	descStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#AAAAAA"))
+
+	separatorStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#444444"))
+
+	infoStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#888888")).
+		Italic(true)
+
+	// Title
+	title := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FAFAFA")).
+		Background(lipgloss.Color("#7D56F4")).
+		Bold(true).
+		Padding(0, 3).
+		Render(" Claude Session Manager - Help ")
+
+	b.WriteString(lipgloss.PlaceHorizontal(m.width, lipgloss.Center, title))
 	b.WriteString("\n\n")
 
-	help := `  Navigation:
-    j/↓         Move down
-    k/↑         Move up
-    J/Shift+↓   Move session down (reorder)
-    K/Shift+↑   Move session up (reorder)
-
-  Actions:
-    enter    Start (if stopped) and attach to session
-    s        Start session without attaching
-    x        Stop session
-    n        Create new session
-    e        Rename session
-    c        Change session color
-    r        Resume: select previous Claude session to continue
-    p        Send prompt/message to running session
-    d        Delete session
-    y        Toggle auto-yes mode (--dangerously-skip-permissions)
-
-  Other:
-    ?        Show this help
-    q        Quit
-
-  In attached session:
-    Ctrl+q      Detach from session (quick)
-    Ctrl+b d    Detach from session (tmux default)
-`
-	b.WriteString(help)
+	// Quick reference - keyboard shortcuts in a row
+	b.WriteString(sectionStyle.Render("  ⌨  Quick Reference"))
 	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("Press esc or ? to close"))
+	b.WriteString(separatorStyle.Render("  " + strings.Repeat("─", 60)))
+	b.WriteString("\n\n")
+
+	// Row 1: Navigation
+	navKeys := []string{
+		keyStyle.Render("↑/k") + descStyle.Render(" up"),
+		keyStyle.Render("↓/j") + descStyle.Render(" down"),
+		keyStyle.Render("⇧↑/K") + descStyle.Render(" move up"),
+		keyStyle.Render("⇧↓/J") + descStyle.Render(" move down"),
+	}
+	b.WriteString("  " + strings.Join(navKeys, "  "))
+	b.WriteString("\n\n")
+
+	// Row 2: Session actions
+	actionKeys := []string{
+		keyStyle.Render("↵") + descStyle.Render(" attach"),
+		keyStyle.Render("n") + descStyle.Render(" new"),
+		keyStyle.Render("s") + descStyle.Render(" start"),
+		keyStyle.Render("x") + descStyle.Render(" stop"),
+		keyStyle.Render("d") + descStyle.Render(" delete"),
+		keyStyle.Render("e") + descStyle.Render(" rename"),
+	}
+	b.WriteString("  " + strings.Join(actionKeys, "  "))
+	b.WriteString("\n\n")
+
+	// Row 3: Features
+	featureKeys := []string{
+		keyStyle.Render("r") + descStyle.Render(" resume"),
+		keyStyle.Render("p") + descStyle.Render(" prompt"),
+		keyStyle.Render("c") + descStyle.Render(" color"),
+		keyStyle.Render("l") + descStyle.Render(" compact"),
+		keyStyle.Render("y") + descStyle.Render(" autoyes"),
+	}
+	b.WriteString("  " + strings.Join(featureKeys, "  "))
+	b.WriteString("\n\n")
+
+	// Row 4: Other
+	otherKeys := []string{
+		keyStyle.Render("?/F1") + descStyle.Render(" help"),
+		keyStyle.Render("q") + descStyle.Render(" quit"),
+		keyStyle.Render("R") + descStyle.Render(" resize"),
+	}
+	b.WriteString("  " + strings.Join(otherKeys, "  "))
+	b.WriteString("\n\n")
+
+	// Detailed sections
+	b.WriteString(sectionStyle.Render("  📋 Detailed Descriptions"))
+	b.WriteString("\n")
+	b.WriteString(separatorStyle.Render("  " + strings.Repeat("─", 60)))
+	b.WriteString("\n\n")
+
+	details := []struct {
+		key  string
+		desc string
+	}{
+		{"↵ Enter", "Start session (if stopped) and attach to tmux session"},
+		{"n New", "Create a new Claude Code session with project path"},
+		{"r Resume", "Continue a previous Claude conversation"},
+		{"p Prompt", "Send a message to running session without attaching"},
+		{"c Color", "Customize session with colors and gradients"},
+		{"l Compact", "Toggle compact view (less spacing between sessions)"},
+		{"y AutoYes", "Toggle --dangerously-skip-permissions flag"},
+	}
+
+	for _, d := range details {
+		b.WriteString("  " + headerStyle.Render(d.key) + " " + descStyle.Render(d.desc) + "\n")
+	}
+
+	b.WriteString("\n")
+	b.WriteString(sectionStyle.Render("  🔗 In Attached Session"))
+	b.WriteString("\n")
+	b.WriteString(separatorStyle.Render("  " + strings.Repeat("─", 60)))
+	b.WriteString("\n\n")
+
+	b.WriteString("  " + keyStyle.Render("Ctrl+q") + descStyle.Render(" Quick detach (resizes preview, works everywhere)") + "\n")
+	b.WriteString("  " + keyStyle.Render("Ctrl+b d") + descStyle.Render(" Standard tmux detach") + "\n")
+
+	b.WriteString("\n")
+	b.WriteString(sectionStyle.Render("  ℹ  About"))
+	b.WriteString("\n")
+	b.WriteString(separatorStyle.Render("  " + strings.Repeat("─", 60)))
+	b.WriteString("\n\n")
+
+	b.WriteString(infoStyle.Render("  Claude Session Manager (CSM) - Manage multiple Claude Code instances"))
+	b.WriteString("\n")
+	b.WriteString(infoStyle.Render("  Sessions stored in: ~/.config/claude-session-manager/"))
+	b.WriteString("\n")
+	b.WriteString(infoStyle.Render("  Built with Bubble Tea • github.com/izll/claude-session-manager"))
+	b.WriteString("\n\n")
+
+	// Footer
+	footer := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#666666")).
+		Render("Press ESC, ? or F1 to close")
+	b.WriteString(lipgloss.PlaceHorizontal(m.width, lipgloss.Center, footer))
 
 	return b.String()
 }
@@ -721,18 +826,59 @@ func (m Model) buildPreviewPane(contentHeight int) string {
 
 // buildStatusBar builds the status bar at the bottom
 func (m Model) buildStatusBar() string {
-	autoYesIndicator := "OFF"
-	if m.autoYes {
-		autoYesIndicator = "ON"
-	}
-	compactIndicator := "OFF"
+	// Styles for status bar
+	keyStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#1a1a2e")).
+		Background(lipgloss.Color("#7D56F4")).
+		Bold(true).
+		Padding(0, 1)
+
+	descStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#888888"))
+
+	separatorStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#444444"))
+
+	onStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#04B575")).
+		Bold(true)
+
+	offStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#666666"))
+
+	sep := separatorStyle.Render(" │ ")
+
+	// Build status items
+	var items []string
+
+	items = append(items, keyStyle.Render("n")+descStyle.Render(" new"))
+	items = append(items, keyStyle.Render("r")+descStyle.Render(" resume"))
+	items = append(items, keyStyle.Render("p")+descStyle.Render(" prompt"))
+	items = append(items, keyStyle.Render("e")+descStyle.Render(" rename"))
+	items = append(items, keyStyle.Render("s")+descStyle.Render(" start"))
+	items = append(items, keyStyle.Render("x")+descStyle.Render(" stop"))
+	items = append(items, keyStyle.Render("d")+descStyle.Render(" delete"))
+	items = append(items, keyStyle.Render("c")+descStyle.Render(" color"))
+
+	// Compact toggle
+	compactStatus := offStyle.Render("OFF")
 	if m.compactList {
-		compactIndicator = "ON"
+		compactStatus = onStyle.Render("ON")
 	}
-	statusText := helpStyle.Render(fmt.Sprintf(
-		"n:new  r:resume  p:prompt  e:rename  s:start  x:stop  d:delete  c:color  l:compact[%s]  y:autoyes[%s]  ?:help  q:quit",
-		compactIndicator, autoYesIndicator,
-	))
+	items = append(items, keyStyle.Render("l")+descStyle.Render(" compact ")+compactStatus)
+
+	// Auto-yes toggle
+	autoYesStatus := offStyle.Render("OFF")
+	if m.autoYes {
+		autoYesStatus = onStyle.Render("ON")
+	}
+	items = append(items, keyStyle.Render("y")+descStyle.Render(" autoyes ")+autoYesStatus)
+
+	items = append(items, keyStyle.Render("?")+descStyle.Render(" help"))
+	items = append(items, keyStyle.Render("q")+descStyle.Render(" quit"))
+
+	statusText := strings.Join(items, sep)
+
 	return "\n" + lipgloss.PlaceHorizontal(m.width, lipgloss.Center, statusText)
 }
 

@@ -17,6 +17,8 @@ A powerful terminal UI (TUI) application for managing multiple Claude Code insta
 - **Compact Mode** - Toggle spacing between sessions for denser view
 - **Smart Resize** - Terminal resize follows when attached, preview size preserved when detached
 - **Overlay Dialogs** - Modal dialogs rendered over the main view with proper Unicode character width handling
+- **Fancy Status Bar** - Styled bottom bar with highlighted keys, toggle indicators, and separators
+- **Rich Help View** - Comprehensive help page with keyboard shortcuts and detailed descriptions (F1 or ?)
 
 ## Installation
 
@@ -84,7 +86,7 @@ csm
 | Key | Action |
 |-----|--------|
 | `R` | Force resize preview pane |
-| `?` | Show help |
+| `F1` / `?` | Show help |
 | `q` | Quit |
 
 ### Inside Attached Session

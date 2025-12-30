@@ -238,7 +238,7 @@ func (m Model) handleListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
-	case "?":
+	case "?", "f1":
 		m.state = stateHelp
 
 	case "c":
