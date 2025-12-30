@@ -313,8 +313,8 @@ func (i *Instance) GetLastLine() string {
 	}
 
 	sessionName := i.TmuxSessionName()
-	// Just capture the visible pane with colors (-e flag preserves ANSI escape sequences)
-	cmd := exec.Command("tmux", "capture-pane", "-t", sessionName, "-p", "-e")
+	// Capture entire scrollback history with colors (-e flag preserves ANSI escape sequences)
+	cmd := exec.Command("tmux", "capture-pane", "-t", sessionName, "-p", "-e", "-S", "-")
 	output, err := cmd.Output()
 	if err != nil {
 		return "..."

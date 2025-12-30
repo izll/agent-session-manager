@@ -201,13 +201,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		// Resize selected instance's tmux pane to match preview width
-		if len(m.instances) > 0 && m.cursor < len(m.instances) {
-			inst := m.instances[m.cursor]
-			if inst.Status == session.StatusRunning {
-				tmuxWidth, tmuxHeight := m.calculateTmuxDimensions()
-				inst.ResizePane(tmuxWidth, tmuxHeight)
-				inst.UpdateDetachBinding(tmuxWidth, tmuxHeight)
-			}
+		if inst := m.getSelectedInstance(); inst != nil && inst.Status == session.StatusRunning {
+			tmuxWidth, tmuxHeight := m.calculateTmuxDimensions()
+			inst.ResizePane(tmuxWidth, tmuxHeight)
+			inst.UpdateDetachBinding(tmuxWidth, tmuxHeight)
 		}
 		return m, nil
 
@@ -286,12 +283,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // handleTick processes tick messages for periodic UI updates
 func (m Model) handleTick() (tea.Model, tea.Cmd) {
-	// Remember currently selected instance ID
-	var selectedID string
-	if len(m.instances) > 0 && m.cursor < len(m.instances) {
-		selectedID = m.instances[m.cursor].ID
-	}
-
 	// Update all instance statuses and last lines
 	for _, inst := range m.instances {
 		inst.UpdateStatus()
@@ -313,21 +304,9 @@ func (m Model) handleTick() (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Keep sessions in user-defined order (no auto-sorting)
-
-	// Restore cursor to previously selected instance
-	if selectedID != "" {
-		for i, inst := range m.instances {
-			if inst.ID == selectedID {
-				m.cursor = i
-				break
-			}
-		}
-	}
-
 	// Update preview for selected instance
-	if len(m.instances) > 0 && m.cursor < len(m.instances) {
-		preview, err := m.instances[m.cursor].GetPreview(PreviewLineCount)
+	if selectedInst := m.getSelectedInstance(); selectedInst != nil {
+		preview, err := selectedInst.GetPreview(PreviewLineCount)
 		if err != nil {
 			m.preview = "(error loading preview)"
 		} else {
@@ -353,8 +332,7 @@ func (m *Model) calculateTmuxDimensions() (width, height int) {
 
 // resizeSelectedPane resizes the currently selected instance's tmux pane
 func (m *Model) resizeSelectedPane() {
-	if len(m.instances) > 0 && m.cursor < len(m.instances) {
-		inst := m.instances[m.cursor]
+	if inst := m.getSelectedInstance(); inst != nil {
 		tmuxWidth, tmuxHeight := m.calculateTmuxDimensions()
 		inst.ResizePane(tmuxWidth, tmuxHeight)
 	}
@@ -410,15 +388,24 @@ func (m *Model) buildVisibleItems() {
 }
 
 // getSelectedInstance returns the currently selected instance, or nil if a group is selected
+// Works in both grouped and non-grouped modes
 func (m *Model) getSelectedInstance() *session.Instance {
-	if m.cursor < 0 || m.cursor >= len(m.visibleItems) {
+	if len(m.groups) > 0 {
+		m.buildVisibleItems()
+		if m.cursor < 0 || m.cursor >= len(m.visibleItems) {
+			return nil
+		}
+		item := m.visibleItems[m.cursor]
+		if item.isGroup {
+			return nil
+		}
+		return item.instance
+	}
+	// Non-grouped mode
+	if m.cursor < 0 || m.cursor >= len(m.instances) {
 		return nil
 	}
-	item := m.visibleItems[m.cursor]
-	if item.isGroup {
-		return nil
-	}
-	return item.instance
+	return m.instances[m.cursor]
 }
 
 // getSelectedGroup returns the currently selected group, or nil if a session is selected

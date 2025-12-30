@@ -138,10 +138,10 @@ func (m *Model) findGroupIndex(id string) int {
 
 // handleEnterSession starts (if needed) and attaches to the selected session
 func (m *Model) handleEnterSession() tea.Cmd {
-	if len(m.instances) == 0 {
+	inst := m.getSelectedInstance()
+	if inst == nil {
 		return nil
 	}
-	inst := m.instances[m.cursor]
 	if inst.Status != session.StatusRunning {
 		if err := inst.Start(); err != nil {
 			m.err = err
@@ -174,10 +174,10 @@ func (m *Model) handleEnterSession() tea.Cmd {
 
 // handleResumeSession shows Claude sessions for the current instance
 func (m *Model) handleResumeSession() error {
-	if len(m.instances) == 0 {
+	inst := m.getSelectedInstance()
+	if inst == nil {
 		return nil
 	}
-	inst := m.instances[m.cursor]
 	sessions, err := session.ListClaudeSessions(inst.Path)
 	if err != nil {
 		return err
@@ -193,10 +193,10 @@ func (m *Model) handleResumeSession() error {
 
 // handleStartSession starts the selected session without attaching
 func (m *Model) handleStartSession() {
-	if len(m.instances) == 0 {
+	inst := m.getSelectedInstance()
+	if inst == nil {
 		return
 	}
-	inst := m.instances[m.cursor]
 	if inst.Status != session.StatusRunning {
 		if err := inst.Start(); err != nil {
 			m.err = err
@@ -208,10 +208,10 @@ func (m *Model) handleStartSession() {
 
 // handleStopSession stops the selected session
 func (m *Model) handleStopSession() {
-	if len(m.instances) == 0 {
+	inst := m.getSelectedInstance()
+	if inst == nil {
 		return
 	}
-	inst := m.instances[m.cursor]
 	if inst.Status == session.StatusRunning {
 		inst.Stop()
 		m.storage.UpdateInstance(inst)
@@ -220,10 +220,10 @@ func (m *Model) handleStopSession() {
 
 // handleRenameSession opens the rename dialog for the selected session
 func (m *Model) handleRenameSession() tea.Cmd {
-	if len(m.instances) == 0 {
+	inst := m.getSelectedInstance()
+	if inst == nil {
 		return nil
 	}
-	inst := m.instances[m.cursor]
 	m.nameInput.SetValue(inst.Name)
 	m.nameInput.Focus()
 	m.state = stateRename
@@ -232,10 +232,10 @@ func (m *Model) handleRenameSession() tea.Cmd {
 
 // handleColorPicker opens the color picker for the selected session
 func (m *Model) handleColorPicker() {
-	if len(m.instances) == 0 {
+	inst := m.getSelectedInstance()
+	if inst == nil {
 		return
 	}
-	inst := m.instances[m.cursor]
 	// Initialize preview colors
 	m.previewFg = inst.Color
 	m.previewBg = inst.BgColor
@@ -270,10 +270,10 @@ func (m *Model) handleGroupColorPicker(group *session.Group) {
 
 // handleSendPrompt opens the prompt input for the selected session
 func (m *Model) handleSendPrompt() {
-	if len(m.instances) == 0 {
+	inst := m.getSelectedInstance()
+	if inst == nil {
 		return
 	}
-	inst := m.instances[m.cursor]
 	if inst.Status != session.StatusRunning {
 		m.err = fmt.Errorf("session not running")
 		return
@@ -293,10 +293,10 @@ func (m *Model) handleSendPrompt() {
 
 // handleForceResize forces resize of the selected pane
 func (m *Model) handleForceResize() {
-	if len(m.instances) == 0 || m.cursor >= len(m.instances) {
+	inst := m.getSelectedInstance()
+	if inst == nil {
 		return
 	}
-	inst := m.instances[m.cursor]
 	tmuxWidth, tmuxHeight := m.calculateTmuxDimensions()
 	if err := inst.ResizePane(tmuxWidth, tmuxHeight); err != nil {
 		m.err = fmt.Errorf("failed to resize pane: %w", err)
@@ -402,8 +402,8 @@ func (m Model) handleListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		// Delete session
-		if len(m.instances) > 0 {
-			m.deleteTarget = m.instances[m.cursor]
+		if inst := m.getSelectedInstance(); inst != nil {
+			m.deleteTarget = inst
 			m.state = stateConfirmDelete
 		}
 
@@ -695,9 +695,8 @@ func (m Model) handleSelectSessionKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.instances = append(m.instances, inst)
 			m.cursor = len(m.instances) - 1
 			m.pendingInstance = nil
-		} else if len(m.instances) > 0 {
+		} else if inst := m.getSelectedInstance(); inst != nil {
 			// Resuming existing instance
-			inst := m.instances[m.cursor]
 			if inst.Status == session.StatusRunning {
 				inst.Stop()
 			}
@@ -752,10 +751,11 @@ func (m Model) handleRenameKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.state = stateList
 		return m, nil
 	case "enter":
-		if m.nameInput.Value() != "" && len(m.instances) > 0 {
-			inst := m.instances[m.cursor]
-			inst.Name = m.nameInput.Value()
-			m.storage.UpdateInstance(inst)
+		if m.nameInput.Value() != "" {
+			if inst := m.getSelectedInstance(); inst != nil {
+				inst.Name = m.nameInput.Value()
+				m.storage.UpdateInstance(inst)
+			}
 			m.state = stateList
 			return m, nil
 		}
@@ -782,9 +782,8 @@ func (m Model) handlePromptKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.state = stateList
 		return m, nil
 	case "enter":
-		if m.promptInput.Value() != "" && len(m.instances) > 0 {
-			inst := m.instances[m.cursor]
-			if inst.Status == session.StatusRunning {
+		if m.promptInput.Value() != "" {
+			if inst := m.getSelectedInstance(); inst != nil && inst.Status == session.StatusRunning {
 				// Send the text followed by Enter
 				text := m.promptInput.Value()
 				if err := inst.SendKeys(text); err != nil {
@@ -873,8 +872,7 @@ func (m Model) handleColorPickerKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "f":
 		// Toggle full row color
-		if len(m.instances) > 0 {
-			inst := m.instances[m.cursor]
+		if inst := m.getSelectedInstance(); inst != nil {
 			inst.FullRowColor = !inst.FullRowColor
 			m.storage.UpdateInstance(inst)
 		}
@@ -897,9 +895,7 @@ func (m Model) handleColorPickerKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 		// Editing session color
-		if len(m.instances) > 0 {
-			inst := m.instances[m.cursor]
-
+		if inst := m.getSelectedInstance(); inst != nil {
 			// Update preview with current selection
 			if m.colorMode == 0 {
 				m.previewFg = selected.Color

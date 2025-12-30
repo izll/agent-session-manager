@@ -419,9 +419,7 @@ func (m Model) colorPickerView() string {
 			fgDisplay = group.Color
 		}
 		b.WriteString(fmt.Sprintf("  Szín: %s\n\n", fgDisplay))
-	} else if len(m.instances) > 0 {
-		inst := m.instances[m.cursor]
-
+	} else if inst := m.getSelectedInstance(); inst != nil {
 		// Get preview colors (current cursor selection for active mode)
 		previewFg := m.previewFg
 		previewBg := m.previewBg
@@ -568,8 +566,7 @@ func (m Model) renameView() string {
 	var boxContent strings.Builder
 	boxContent.WriteString("\n")
 
-	if len(m.instances) > 0 {
-		inst := m.instances[m.cursor]
+	if inst := m.getSelectedInstance(); inst != nil {
 		boxContent.WriteString(fmt.Sprintf("  Current: %s\n\n", inst.Name))
 	}
 
@@ -595,8 +592,7 @@ func (m Model) promptView() string {
 	var boxContent strings.Builder
 	boxContent.WriteString("\n")
 
-	if len(m.instances) > 0 {
-		inst := m.instances[m.cursor]
+	if inst := m.getSelectedInstance(); inst != nil {
 		boxContent.WriteString(fmt.Sprintf("  Session: %s\n\n", inst.Name))
 	}
 
@@ -767,7 +763,7 @@ func (m Model) getLastLine(inst *session.Instance) string {
 	}
 	// Truncate to prevent line wrap
 	cleanLine := strings.TrimSpace(stripANSI(lastLine))
-	maxLen := ListPaneWidth - 10 // Account for "     └─ " prefix
+	maxLen := ListPaneWidth - 14 // Account for tree prefix + "└─ "
 	if maxLen < 10 {
 		maxLen = 10
 	}
@@ -921,13 +917,13 @@ func (m Model) renderGroupRow(group *session.Group, index int, listWidth int) st
 
 	selected := index == m.cursor
 	if selected {
-		row.WriteString(fmt.Sprintf(" %s 📁 %s %s [%d]\n",
+		row.WriteString(fmt.Sprintf(" %s 📁%s %s [%d]\n",
 			listSelectedStyle.Render("▸"),
 			collapseIcon,
 			groupStyle.Render(name),
 			sessionCount))
 	} else {
-		row.WriteString(fmt.Sprintf("   📁 %s %s [%d]\n",
+		row.WriteString(fmt.Sprintf("   📁%s %s [%d]\n",
 			collapseIcon,
 			groupStyle.Render(name),
 			sessionCount))
@@ -948,15 +944,15 @@ func (m Model) renderGroupedSessionRow(inst *session.Instance, index int, listWi
 	var prefix, lastLinePrefix string
 	if inst.GroupID != "" {
 		if isLast {
-			prefix = "   └─"
-			lastLinePrefix = "     "
+			prefix = "  └──"
+			lastLinePrefix = "    " // 4 spaces to align └─ under ●
 		} else {
-			prefix = "   ├─"
-			lastLinePrefix = "   │"
+			prefix = "  ├──"
+			lastLinePrefix = "  │ " // │ aligns with ├, space before └─
 		}
 	} else {
-		prefix = "  "
-		lastLinePrefix = "  "
+		prefix = " "
+		lastLinePrefix = ""
 	}
 
 	// Status indicator based on activity
@@ -1001,12 +997,16 @@ func (m Model) renderGroupedSessionRow(inst *session.Instance, index int, listWi
 	}
 	row.WriteString("\n")
 
-	// Show last output line with tree connector
+	// Show last output line with tree connector (└─ aligns under ● status icon)
 	lastLine := m.getLastLine(inst)
 	row.WriteString(fmt.Sprintf(" %s  └─ %s", treeStyle.Render(lastLinePrefix), lastLine))
 	row.WriteString("\n")
 
 	if !m.compactList {
+		// Add vertical line in empty row for non-last grouped sessions
+		if inst.GroupID != "" && !isLast {
+			row.WriteString(treeStyle.Render("   │"))
+		}
 		row.WriteString("\n")
 	}
 
