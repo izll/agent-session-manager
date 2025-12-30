@@ -1,5 +1,9 @@
 # Binary
 csm
+claude-session-manager
+
+# Project-specific
+CLAUDE.md
 
 # Claude Code local settings
 .claude/

@@ -931,6 +931,10 @@ func (m Model) renderGroupRow(group *session.Group, index int, listWidth int) st
 	}
 
 	if !m.compactList {
+		// Add vertical line under group header if group has sessions and is expanded
+		if !group.Collapsed && sessionCount > 0 {
+			row.WriteString(dimStyle.Render("   │"))
+		}
 		row.WriteString("\n")
 	}
 
