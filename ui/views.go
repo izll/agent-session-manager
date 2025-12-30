@@ -1007,14 +1007,15 @@ func (m Model) renderGroupedSessionRow(inst *session.Instance, index int, listWi
 		lastLine := m.getLastLine(inst)
 		row.WriteString(fmt.Sprintf(" %s  └─ %s", treeStyle.Render(lastLinePrefix), lastLine))
 		row.WriteString("\n")
+	}
 
-		if !m.compactList {
-			// Add vertical line in empty row for non-last grouped sessions
-			if inst.GroupID != "" && !isLast {
-				row.WriteString(treeStyle.Render("   │"))
-			}
-			row.WriteString("\n")
+	// Add empty row spacing when not in compact mode
+	if !m.compactList {
+		// Add vertical line in empty row for non-last grouped sessions
+		if inst.GroupID != "" && !isLast {
+			row.WriteString(treeStyle.Render("   │"))
 		}
+		row.WriteString("\n")
 	}
 
 	return row.String()
