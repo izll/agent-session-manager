@@ -448,6 +448,9 @@ func (m Model) handleListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "l":
 		m.compactList = !m.compactList
 
+	case "t":
+		m.hideStatusLines = !m.hideStatusLines
+
 	case "p":
 		m.handleSendPrompt()
 

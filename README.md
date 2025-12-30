@@ -92,6 +92,7 @@ csm
 |-----|--------|
 | `c` | Change session color |
 | `l` | Toggle compact mode |
+| `t` | Toggle status lines (last output under sessions) |
 | `y` | Toggle auto-yes mode (`--dangerously-skip-permissions`) |
 
 #### Other

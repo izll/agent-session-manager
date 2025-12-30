@@ -76,6 +76,7 @@ type Model struct {
 	previewFg       string                    // Preview foreground color
 	previewBg       string                    // Preview background color
 	compactList     bool                      // No extra line between sessions
+	hideStatusLines bool                      // Hide last output line under sessions
 	groups          []*session.Group          // Session groups
 	groupInput      textinput.Model           // Input for group name
 	groupCursor     int                       // Cursor for group selection

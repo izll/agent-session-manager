@@ -201,6 +201,7 @@ func (m Model) helpView() string {
 		{"→ Right", "Expand a collapsed group"},
 		{"← Left", "Collapse an expanded group"},
 		{"l Compact", "Toggle compact view (less spacing between sessions)"},
+		{"t Status", "Toggle status line visibility under sessions"},
 		{"y AutoYes", "Toggle --dangerously-skip-permissions flag"},
 	}
 
@@ -998,16 +999,18 @@ func (m Model) renderGroupedSessionRow(inst *session.Instance, index int, listWi
 	row.WriteString("\n")
 
 	// Show last output line with tree connector (└─ aligns under ● status icon)
-	lastLine := m.getLastLine(inst)
-	row.WriteString(fmt.Sprintf(" %s  └─ %s", treeStyle.Render(lastLinePrefix), lastLine))
-	row.WriteString("\n")
-
-	if !m.compactList {
-		// Add vertical line in empty row for non-last grouped sessions
-		if inst.GroupID != "" && !isLast {
-			row.WriteString(treeStyle.Render("   │"))
-		}
+	if !m.hideStatusLines {
+		lastLine := m.getLastLine(inst)
+		row.WriteString(fmt.Sprintf(" %s  └─ %s", treeStyle.Render(lastLinePrefix), lastLine))
 		row.WriteString("\n")
+
+		if !m.compactList {
+			// Add vertical line in empty row for non-last grouped sessions
+			if inst.GroupID != "" && !isLast {
+				row.WriteString(treeStyle.Render("   │"))
+			}
+			row.WriteString("\n")
+		}
 	}
 
 	return row.String()
@@ -1153,6 +1156,13 @@ func (m Model) buildStatusBar() string {
 		compactStatus = onStyle.Render("ON")
 	}
 	items = append(items, keyStyle.Render("l")+descStyle.Render(" compact ")+compactStatus)
+
+	// Status lines toggle
+	statusLinesStatus := onStyle.Render("ON")
+	if m.hideStatusLines {
+		statusLinesStatus = offStyle.Render("OFF")
+	}
+	items = append(items, keyStyle.Render("t")+descStyle.Render(" status ")+statusLinesStatus)
 
 	// Auto-yes toggle
 	autoYesStatus := offStyle.Render("OFF")
