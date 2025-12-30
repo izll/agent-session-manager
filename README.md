@@ -1,4 +1,4 @@
-# Agent Session Manager (ASM)
+# Agent Session Manager (ASMGR)
 
 A powerful terminal UI (TUI) application for managing multiple AI coding assistant CLI sessions using tmux. Inspired by [Claude Squad](https://github.com/smtg-ai/claude-squad).
 

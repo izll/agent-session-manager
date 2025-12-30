@@ -245,7 +245,7 @@ func (m Model) helpView() string {
 	b.WriteString(separatorStyle.Render("  " + strings.Repeat("─", 60)))
 	b.WriteString("\n\n")
 
-	b.WriteString(infoStyle.Render("  Agent Session Manager (ASM) - Manage multiple AI coding agents"))
+	b.WriteString(infoStyle.Render("  Agent Session Manager (ASMGR) - Manage multiple AI coding agents"))
 	b.WriteString("\n")
 	b.WriteString(infoStyle.Render("  Sessions stored in: ~/.config/agent-session-manager/"))
 	b.WriteString("\n")
