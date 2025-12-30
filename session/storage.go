@@ -5,14 +5,24 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 type Storage struct {
 	configPath string
 }
 
+// Group represents a session group for organizing sessions
+type Group struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Collapsed bool   `json:"collapsed"`
+	Color     string `json:"color,omitempty"` // Group name color
+}
+
 type StorageData struct {
 	Instances []*Instance `json:"instances"`
+	Groups    []*Group    `json:"groups,omitempty"`
 }
 
 func NewStorage() (*Storage, error) {
@@ -32,17 +42,23 @@ func NewStorage() (*Storage, error) {
 }
 
 func (s *Storage) Load() ([]*Instance, error) {
+	instances, _, err := s.LoadAll()
+	return instances, err
+}
+
+// LoadAll loads both instances and groups
+func (s *Storage) LoadAll() ([]*Instance, []*Group, error) {
 	data, err := os.ReadFile(s.configPath)
 	if os.IsNotExist(err) {
-		return []*Instance{}, nil
+		return []*Instance{}, []*Group{}, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to read config file: %w", err)
+		return nil, nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 
 	var storageData StorageData
 	if err := json.Unmarshal(data, &storageData); err != nil {
-		return nil, fmt.Errorf("failed to parse config file: %w", err)
+		return nil, nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
 
 	// Update status for all instances
@@ -50,12 +66,23 @@ func (s *Storage) Load() ([]*Instance, error) {
 		instance.UpdateStatus()
 	}
 
-	return storageData.Instances, nil
+	if storageData.Groups == nil {
+		storageData.Groups = []*Group{}
+	}
+
+	return storageData.Instances, storageData.Groups, nil
 }
 
 func (s *Storage) Save(instances []*Instance) error {
+	_, groups, _ := s.LoadAll()
+	return s.SaveWithGroups(instances, groups)
+}
+
+// SaveWithGroups saves both instances and groups
+func (s *Storage) SaveWithGroups(instances []*Instance, groups []*Group) error {
 	storageData := StorageData{
 		Instances: instances,
+		Groups:    groups,
 	}
 
 	data, err := json.MarshalIndent(storageData, "", "  ")
@@ -161,4 +188,126 @@ func (s *Storage) GetInstanceByName(name string) (*Instance, error) {
 // SaveAll saves all instances (preserving order) - used for reordering
 func (s *Storage) SaveAll(instances []*Instance) error {
 	return s.Save(instances)
+}
+
+// SaveAllWithGroups saves all instances and groups
+func (s *Storage) SaveAllWithGroups(instances []*Instance, groups []*Group) error {
+	return s.SaveWithGroups(instances, groups)
+}
+
+// GetGroups returns all groups
+func (s *Storage) GetGroups() ([]*Group, error) {
+	_, groups, err := s.LoadAll()
+	return groups, err
+}
+
+// AddGroup adds a new group
+func (s *Storage) AddGroup(name string) (*Group, error) {
+	instances, groups, err := s.LoadAll()
+	if err != nil {
+		return nil, err
+	}
+
+	// Check for duplicate names
+	for _, g := range groups {
+		if g.Name == name {
+			return nil, fmt.Errorf("group with name '%s' already exists", name)
+		}
+	}
+
+	group := &Group{
+		ID:        fmt.Sprintf("grp_%d", time.Now().UnixNano()),
+		Name:      name,
+		Collapsed: false,
+	}
+
+	groups = append(groups, group)
+	if err := s.SaveWithGroups(instances, groups); err != nil {
+		return nil, err
+	}
+
+	return group, nil
+}
+
+// RemoveGroup removes a group (sessions become ungrouped)
+func (s *Storage) RemoveGroup(id string) error {
+	instances, groups, err := s.LoadAll()
+	if err != nil {
+		return err
+	}
+
+	// Ungroup all sessions in this group
+	for _, inst := range instances {
+		if inst.GroupID == id {
+			inst.GroupID = ""
+		}
+	}
+
+	// Remove the group
+	newGroups := make([]*Group, 0, len(groups))
+	found := false
+	for _, g := range groups {
+		if g.ID == id {
+			found = true
+			continue
+		}
+		newGroups = append(newGroups, g)
+	}
+
+	if !found {
+		return fmt.Errorf("group not found")
+	}
+
+	return s.SaveWithGroups(instances, newGroups)
+}
+
+// RenameGroup renames a group
+func (s *Storage) RenameGroup(id, name string) error {
+	instances, groups, err := s.LoadAll()
+	if err != nil {
+		return err
+	}
+
+	for _, g := range groups {
+		if g.ID == id {
+			g.Name = name
+			return s.SaveWithGroups(instances, groups)
+		}
+	}
+
+	return fmt.Errorf("group not found")
+}
+
+// ToggleGroupCollapsed toggles the collapsed state of a group
+func (s *Storage) ToggleGroupCollapsed(id string) error {
+	instances, groups, err := s.LoadAll()
+	if err != nil {
+		return err
+	}
+
+	for _, g := range groups {
+		if g.ID == id {
+			g.Collapsed = !g.Collapsed
+			return s.SaveWithGroups(instances, groups)
+		}
+	}
+
+	return fmt.Errorf("group not found")
+}
+
+// SetInstanceGroup assigns an instance to a group
+func (s *Storage) SetInstanceGroup(instanceID, groupID string) error {
+	instances, groups, err := s.LoadAll()
+	if err != nil {
+		return err
+	}
+
+	for _, inst := range instances {
+		if inst.ID == instanceID {
+			inst.GroupID = groupID
+			return s.SaveWithGroups(instances, groups)
+		}
+	}
+
+	return fmt.Errorf("instance not found")
 }

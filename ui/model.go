@@ -42,7 +42,10 @@ const (
 	stateRename
 	stateHelp
 	stateColorPicker
-	statePrompt // Send text to session
+	statePrompt      // Send text to session
+	stateNewGroup    // Creating new group
+	stateRenameGroup // Renaming a group
+	stateSelectGroup // Assigning session to group
 )
 
 // Model represents the main TUI application state for Claude Session Manager.
@@ -73,6 +76,19 @@ type Model struct {
 	previewFg       string                    // Preview foreground color
 	previewBg       string                    // Preview background color
 	compactList     bool                      // No extra line between sessions
+	groups          []*session.Group          // Session groups
+	groupInput      textinput.Model           // Input for group name
+	groupCursor     int                       // Cursor for group selection
+	visibleItems    []visibleItem             // Flattened list of visible items (groups + sessions)
+	pendingGroupID  string                    // Group ID for new session creation
+	editingGroup    *session.Group            // Group being edited in color picker (nil = editing session)
+}
+
+// visibleItem represents an item in the flattened list view (group header or session)
+type visibleItem struct {
+	isGroup  bool              // true if this is a group header
+	group    *session.Group    // The group (if isGroup is true)
+	instance *session.Instance // The session instance (if isGroup is false)
 }
 
 // tickMsg is sent periodically to update the UI
@@ -90,7 +106,7 @@ func NewModel() (Model, error) {
 		return Model{}, err
 	}
 
-	instances, err := storage.Load()
+	instances, groups, err := storage.LoadAll()
 	if err != nil {
 		return Model{}, err
 	}
@@ -109,6 +125,10 @@ func NewModel() (Model, error) {
 	promptInput.Prompt = "" // Remove the default "> " prompt
 	promptInput.Cursor.SetMode(cursor.CursorStatic) // No blinking
 
+	groupInput := textinput.New()
+	groupInput.Placeholder = "Group name"
+	groupInput.CharLimit = 50
+
 	m := Model{
 		instances:   instances,
 		storage:     storage,
@@ -116,6 +136,8 @@ func NewModel() (Model, error) {
 		nameInput:   nameInput,
 		pathInput:   pathInput,
 		promptInput: promptInput,
+		groupInput:  groupInput,
+		groups:      groups,
 		lastLines:   make(map[string]string),
 		prevContent: make(map[string]string),
 		isActive:    make(map[string]bool),
@@ -233,6 +255,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleColorPickerKeys(msg)
 		case statePrompt:
 			return m.handlePromptKeys(msg)
+		case stateNewGroup:
+			return m.handleNewGroupKeys(msg)
+		case stateRenameGroup:
+			return m.handleRenameGroupKeys(msg)
+		case stateSelectGroup:
+			return m.handleSelectGroupKeys(msg)
 		}
 	}
 
@@ -246,6 +274,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if m.state == statePrompt {
 		m.promptInput, cmd = m.promptInput.Update(msg)
+		cmds = append(cmds, cmd)
+	}
+	if m.state == stateNewGroup || m.state == stateRenameGroup {
+		m.groupInput, cmd = m.groupInput.Update(msg)
 		cmds = append(cmds, cmd)
 	}
 
@@ -334,4 +366,125 @@ func (m *Model) getMaxColorItems() int {
 		return len(colorOptions) - GradientColorCount
 	}
 	return len(colorOptions)
+}
+
+// buildVisibleItems builds the flattened list of visible items (groups + sessions)
+func (m *Model) buildVisibleItems() {
+	m.visibleItems = []visibleItem{}
+
+	// Get sessions by group
+	groupedSessions := make(map[string][]*session.Instance)
+	var ungroupedSessions []*session.Instance
+
+	for _, inst := range m.instances {
+		if inst.GroupID == "" {
+			ungroupedSessions = append(ungroupedSessions, inst)
+		} else {
+			groupedSessions[inst.GroupID] = append(groupedSessions[inst.GroupID], inst)
+		}
+	}
+
+	// Add groups and their sessions
+	for _, group := range m.groups {
+		m.visibleItems = append(m.visibleItems, visibleItem{
+			isGroup: true,
+			group:   group,
+		})
+		if !group.Collapsed {
+			for _, inst := range groupedSessions[group.ID] {
+				m.visibleItems = append(m.visibleItems, visibleItem{
+					isGroup:  false,
+					instance: inst,
+				})
+			}
+		}
+	}
+
+	// Add ungrouped sessions
+	for _, inst := range ungroupedSessions {
+		m.visibleItems = append(m.visibleItems, visibleItem{
+			isGroup:  false,
+			instance: inst,
+		})
+	}
+}
+
+// getSelectedInstance returns the currently selected instance, or nil if a group is selected
+func (m *Model) getSelectedInstance() *session.Instance {
+	if m.cursor < 0 || m.cursor >= len(m.visibleItems) {
+		return nil
+	}
+	item := m.visibleItems[m.cursor]
+	if item.isGroup {
+		return nil
+	}
+	return item.instance
+}
+
+// getSelectedGroup returns the currently selected group, or nil if a session is selected
+func (m *Model) getSelectedGroup() *session.Group {
+	if m.cursor < 0 || m.cursor >= len(m.visibleItems) {
+		return nil
+	}
+	item := m.visibleItems[m.cursor]
+	if !item.isGroup {
+		return nil
+	}
+	return item.group
+}
+
+// getSessionsInGroup returns all sessions that belong to a group
+func (m *Model) getSessionsInGroup(groupID string) []*session.Instance {
+	var sessions []*session.Instance
+	for _, inst := range m.instances {
+		if inst.GroupID == groupID {
+			sessions = append(sessions, inst)
+		}
+	}
+	return sessions
+}
+
+// getCurrentGroupID returns the group ID of the currently selected item
+// Returns the group ID if a group is selected, or the group ID of the selected session
+func (m *Model) getCurrentGroupID() string {
+	if len(m.groups) == 0 {
+		return ""
+	}
+	m.buildVisibleItems()
+	if m.cursor >= 0 && m.cursor < len(m.visibleItems) {
+		item := m.visibleItems[m.cursor]
+		if item.isGroup {
+			return item.group.ID
+		}
+		if item.instance != nil {
+			return item.instance.GroupID
+		}
+	}
+	return ""
+}
+
+// isLastInGroup checks if the session at the given visibleItems index is the last one in its group
+func (m *Model) isLastInGroup(index int) bool {
+	if index < 0 || index >= len(m.visibleItems) {
+		return true
+	}
+	item := m.visibleItems[index]
+	if item.isGroup || item.instance == nil {
+		return true
+	}
+	groupID := item.instance.GroupID
+	if groupID == "" {
+		// Ungrouped session - check if next is also ungrouped or end of list
+		if index+1 >= len(m.visibleItems) {
+			return true
+		}
+		nextItem := m.visibleItems[index+1]
+		return nextItem.isGroup || nextItem.instance.GroupID != ""
+	}
+	// Grouped session - check if next is in same group
+	if index+1 >= len(m.visibleItems) {
+		return true
+	}
+	nextItem := m.visibleItems[index+1]
+	return nextItem.isGroup || nextItem.instance.GroupID != groupID
 }

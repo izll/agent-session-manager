@@ -40,6 +40,7 @@ type Instance struct {
 	Color           string    `json:"color,omitempty"`             // Foreground color
 	BgColor         string    `json:"bg_color,omitempty"`          // Background color
 	FullRowColor    bool      `json:"full_row_color,omitempty"`    // Extend background to full row
+	GroupID         string    `json:"group_id,omitempty"`          // Session group ID
 
 	// ptmx is a PTY running tmux attach - used to control pane size while detached
 	ptmx *os.File `json:"-"`

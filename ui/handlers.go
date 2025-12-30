@@ -10,8 +10,52 @@ import (
 	"github.com/izll/claude-session-manager/session"
 )
 
-// handleMoveSessionUp moves the selected session up in the list
+// handleMoveSessionUp moves the selected session or group up in the list
 func (m *Model) handleMoveSessionUp() {
+	// If groups exist, handle grouped reordering
+	if len(m.groups) > 0 {
+		m.buildVisibleItems()
+		if m.cursor <= 0 || m.cursor >= len(m.visibleItems) {
+			return
+		}
+		currentItem := m.visibleItems[m.cursor]
+		prevItem := m.visibleItems[m.cursor-1]
+
+		// Moving a group up
+		if currentItem.isGroup {
+			groupIdx := m.findGroupIndex(currentItem.group.ID)
+			if groupIdx > 0 {
+				m.groups[groupIdx], m.groups[groupIdx-1] = m.groups[groupIdx-1], m.groups[groupIdx]
+				m.storage.SaveAllWithGroups(m.instances, m.groups)
+				m.buildVisibleItems()
+				// Find new cursor position
+				for i, item := range m.visibleItems {
+					if item.isGroup && item.group.ID == currentItem.group.ID {
+						m.cursor = i
+						break
+					}
+				}
+			}
+			return
+		}
+
+		// If previous is a group header, can't move further up
+		if prevItem.isGroup {
+			return
+		}
+
+		// Both are sessions - swap in the instances array (keep original groups)
+		currentIdx := m.findInstanceIndex(currentItem.instance.ID)
+		prevIdx := m.findInstanceIndex(prevItem.instance.ID)
+		if currentIdx >= 0 && prevIdx >= 0 {
+			m.instances[currentIdx], m.instances[prevIdx] = m.instances[prevIdx], m.instances[currentIdx]
+			m.cursor--
+			m.storage.SaveAll(m.instances)
+		}
+		return
+	}
+
+	// Original behavior for non-grouped view
 	if m.cursor > 0 && len(m.instances) > 1 {
 		m.instances[m.cursor], m.instances[m.cursor-1] = m.instances[m.cursor-1], m.instances[m.cursor]
 		m.cursor--
@@ -19,13 +63,77 @@ func (m *Model) handleMoveSessionUp() {
 	}
 }
 
-// handleMoveSessionDown moves the selected session down in the list
+// handleMoveSessionDown moves the selected session or group down in the list
 func (m *Model) handleMoveSessionDown() {
+	// If groups exist, handle grouped reordering
+	if len(m.groups) > 0 {
+		m.buildVisibleItems()
+		if m.cursor < 0 || m.cursor >= len(m.visibleItems)-1 {
+			return
+		}
+		currentItem := m.visibleItems[m.cursor]
+		nextItem := m.visibleItems[m.cursor+1]
+
+		// Moving a group down
+		if currentItem.isGroup {
+			groupIdx := m.findGroupIndex(currentItem.group.ID)
+			if groupIdx >= 0 && groupIdx < len(m.groups)-1 {
+				m.groups[groupIdx], m.groups[groupIdx+1] = m.groups[groupIdx+1], m.groups[groupIdx]
+				m.storage.SaveAllWithGroups(m.instances, m.groups)
+				m.buildVisibleItems()
+				// Find new cursor position
+				for i, item := range m.visibleItems {
+					if item.isGroup && item.group.ID == currentItem.group.ID {
+						m.cursor = i
+						break
+					}
+				}
+			}
+			return
+		}
+
+		// If next is a group header, can't move further down
+		if nextItem.isGroup {
+			return
+		}
+
+		// Both are sessions - swap in the instances array (keep original groups)
+		currentIdx := m.findInstanceIndex(currentItem.instance.ID)
+		nextIdx := m.findInstanceIndex(nextItem.instance.ID)
+		if currentIdx >= 0 && nextIdx >= 0 {
+			m.instances[currentIdx], m.instances[nextIdx] = m.instances[nextIdx], m.instances[currentIdx]
+			m.cursor++
+			m.storage.SaveAll(m.instances)
+		}
+		return
+	}
+
+	// Original behavior for non-grouped view
 	if m.cursor < len(m.instances)-1 {
 		m.instances[m.cursor], m.instances[m.cursor+1] = m.instances[m.cursor+1], m.instances[m.cursor]
 		m.cursor++
 		m.storage.SaveAll(m.instances)
 	}
+}
+
+// findInstanceIndex finds the index of an instance in the instances array by ID
+func (m *Model) findInstanceIndex(id string) int {
+	for i, inst := range m.instances {
+		if inst.ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
+// findGroupIndex finds the index of a group in the groups array by ID
+func (m *Model) findGroupIndex(id string) int {
+	for i, g := range m.groups {
+		if g.ID == id {
+			return i
+		}
+	}
+	return -1
 }
 
 // handleEnterSession starts (if needed) and attaches to the selected session
@@ -132,10 +240,27 @@ func (m *Model) handleColorPicker() {
 	m.previewFg = inst.Color
 	m.previewBg = inst.BgColor
 	m.colorMode = 0
+	m.editingGroup = nil
 	// Find current color index
 	m.colorCursor = 0
 	for i, c := range colorOptions {
 		if c.Color == inst.Color || c.Name == inst.Color {
+			m.colorCursor = i
+			break
+		}
+	}
+	m.state = stateColorPicker
+}
+
+// handleGroupColorPicker opens the color picker for a group
+func (m *Model) handleGroupColorPicker(group *session.Group) {
+	m.editingGroup = group
+	m.previewFg = group.Color
+	m.previewBg = ""
+	m.colorMode = 0
+	m.colorCursor = 0
+	for i, c := range colorOptions {
+		if c.Color == group.Color || c.Name == group.Color {
 			m.colorCursor = i
 			break
 		}
@@ -185,13 +310,27 @@ func (m Model) handleListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case "up", "k":
-		if m.cursor > 0 {
+		// If groups exist, navigate through visible items
+		if len(m.groups) > 0 {
+			m.buildVisibleItems()
+			if m.cursor > 0 {
+				m.cursor--
+				m.resizeSelectedPane()
+			}
+		} else if m.cursor > 0 {
 			m.cursor--
 			m.resizeSelectedPane()
 		}
 
 	case "down", "j":
-		if m.cursor < len(m.instances)-1 {
+		// If groups exist, navigate through visible items
+		if len(m.groups) > 0 {
+			m.buildVisibleItems()
+			if m.cursor < len(m.visibleItems)-1 {
+				m.cursor++
+				m.resizeSelectedPane()
+			}
+		} else if m.cursor < len(m.instances)-1 {
 			m.cursor++
 			m.resizeSelectedPane()
 		}
@@ -203,6 +342,21 @@ func (m Model) handleListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.handleMoveSessionDown()
 
 	case "enter":
+		// Check if a group is selected
+		if len(m.groups) > 0 {
+			m.buildVisibleItems()
+			if m.cursor >= 0 && m.cursor < len(m.visibleItems) {
+				item := m.visibleItems[m.cursor]
+				if item.isGroup {
+					// Toggle collapse
+					m.storage.ToggleGroupCollapsed(item.group.ID)
+					groups, _ := m.storage.GetGroups()
+					m.groups = groups
+					m.buildVisibleItems()
+					return m, nil
+				}
+			}
+		}
 		if cmd := m.handleEnterSession(); cmd != nil {
 			return m, cmd
 		}
@@ -211,6 +365,8 @@ func (m Model) handleListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.state = stateNewPath
 		m.pathInput.SetValue("")
 		m.pathInput.Focus()
+		// Remember current group for new session
+		m.pendingGroupID = m.getCurrentGroupID()
 		return m, textinput.Blink
 
 	case "r":
@@ -225,6 +381,27 @@ func (m Model) handleListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.handleStopSession()
 
 	case "d":
+		// Check if a group is selected
+		m.buildVisibleItems()
+		if m.cursor >= 0 && m.cursor < len(m.visibleItems) {
+			item := m.visibleItems[m.cursor]
+			if item.isGroup {
+				// Delete group
+				if err := m.storage.RemoveGroup(item.group.ID); err != nil {
+					m.err = err
+				} else {
+					// Reload groups
+					groups, _ := m.storage.GetGroups()
+					m.groups = groups
+					m.buildVisibleItems()
+					if m.cursor >= len(m.visibleItems) && m.cursor > 0 {
+						m.cursor--
+					}
+				}
+				return m, nil
+			}
+		}
+		// Delete session
 		if len(m.instances) > 0 {
 			m.deleteTarget = m.instances[m.cursor]
 			m.state = stateConfirmDelete
@@ -234,6 +411,19 @@ func (m Model) handleListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.autoYes = !m.autoYes
 
 	case "e":
+		// Check if a group is selected
+		m.buildVisibleItems()
+		if m.cursor >= 0 && m.cursor < len(m.visibleItems) {
+			item := m.visibleItems[m.cursor]
+			if item.isGroup {
+				// Rename group
+				m.groupInput.SetValue(item.group.Name)
+				m.groupInput.Focus()
+				m.state = stateRenameGroup
+				return m, textinput.Blink
+			}
+		}
+		// Rename session
 		if cmd := m.handleRenameSession(); cmd != nil {
 			return m, cmd
 		}
@@ -242,6 +432,17 @@ func (m Model) handleListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.state = stateHelp
 
 	case "c":
+		// Check if a group is selected
+		if len(m.groups) > 0 {
+			m.buildVisibleItems()
+			if m.cursor >= 0 && m.cursor < len(m.visibleItems) {
+				item := m.visibleItems[m.cursor]
+				if item.isGroup {
+					m.handleGroupColorPicker(item.group)
+					return m, nil
+				}
+			}
+		}
 		m.handleColorPicker()
 
 	case "l":
@@ -252,6 +453,83 @@ func (m Model) handleListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "R":
 		m.handleForceResize()
+
+	case "g":
+		// Create new group
+		m.groupInput.SetValue("")
+		m.groupInput.Focus()
+		m.state = stateNewGroup
+		return m, textinput.Blink
+
+	case "G":
+		// Assign session to group
+		if len(m.instances) > 0 {
+			// Find current session
+			var inst *session.Instance
+			if len(m.groups) > 0 {
+				m.buildVisibleItems()
+				if m.cursor >= 0 && m.cursor < len(m.visibleItems) {
+					item := m.visibleItems[m.cursor]
+					if !item.isGroup {
+						inst = item.instance
+					}
+				}
+			} else if m.cursor < len(m.instances) {
+				inst = m.instances[m.cursor]
+			}
+
+			// Pre-select current group
+			m.groupCursor = 0 // Default to "No Group"
+			if inst != nil && inst.GroupID != "" {
+				for i, g := range m.groups {
+					if g.ID == inst.GroupID {
+						m.groupCursor = i + 1 // +1 because 0 is "No Group"
+						break
+					}
+				}
+			}
+			m.state = stateSelectGroup
+		}
+
+	case "tab":
+		// Toggle group collapse
+		m.buildVisibleItems()
+		if m.cursor >= 0 && m.cursor < len(m.visibleItems) {
+			item := m.visibleItems[m.cursor]
+			if item.isGroup {
+				m.storage.ToggleGroupCollapsed(item.group.ID)
+				// Reload groups
+				groups, _ := m.storage.GetGroups()
+				m.groups = groups
+				m.buildVisibleItems()
+			}
+		}
+
+	case "right":
+		// Expand group
+		m.buildVisibleItems()
+		if m.cursor >= 0 && m.cursor < len(m.visibleItems) {
+			item := m.visibleItems[m.cursor]
+			if item.isGroup && item.group.Collapsed {
+				m.storage.ToggleGroupCollapsed(item.group.ID)
+				groups, _ := m.storage.GetGroups()
+				m.groups = groups
+				m.buildVisibleItems()
+			}
+		}
+
+	case "left":
+		// Collapse group
+		m.buildVisibleItems()
+		if m.cursor >= 0 && m.cursor < len(m.visibleItems) {
+			item := m.visibleItems[m.cursor]
+			if item.isGroup && !item.group.Collapsed {
+				m.storage.ToggleGroupCollapsed(item.group.ID)
+				groups, _ := m.storage.GetGroups()
+				m.groups = groups
+				m.buildVisibleItems()
+			}
+		}
 	}
 
 	return m, nil
@@ -271,6 +549,11 @@ func (m Model) handleNewNameKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.err = err
 				m.state = stateList
 				return m, nil
+			}
+
+			// Assign to current group if any
+			if m.pendingGroupID != "" {
+				inst.GroupID = m.pendingGroupID
 			}
 
 			// Check for existing Claude sessions
@@ -597,9 +880,25 @@ func (m Model) handleColorPickerKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "enter":
+		selected := colorOptions[m.colorCursor]
+
+		// Editing group color
+		if m.editingGroup != nil {
+			if selected.Color == "" || selected.Color == "none" {
+				m.editingGroup.Color = ""
+			} else {
+				m.editingGroup.Color = selected.Color
+			}
+			m.storage.SaveAllWithGroups(m.instances, m.groups)
+			m.editingGroup = nil
+			m.state = stateList
+			m.colorMode = 0
+			return m, nil
+		}
+
+		// Editing session color
 		if len(m.instances) > 0 {
 			inst := m.instances[m.cursor]
-			selected := colorOptions[m.colorCursor]
 
 			// Update preview with current selection
 			if m.colorMode == 0 {
@@ -624,6 +923,110 @@ func (m Model) handleColorPickerKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.state = stateList
 			m.colorMode = 0
 		}
+		return m, nil
+	}
+
+	return m, nil
+}
+
+// handleNewGroupKeys handles keyboard input in the new group dialog
+func (m Model) handleNewGroupKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.state = stateList
+		return m, nil
+	case "enter":
+		if m.groupInput.Value() != "" {
+			group, err := m.storage.AddGroup(m.groupInput.Value())
+			if err != nil {
+				m.err = err
+			} else {
+				m.groups = append(m.groups, group)
+				m.buildVisibleItems()
+			}
+			m.state = stateList
+			return m, nil
+		}
+	}
+
+	var cmd tea.Cmd
+	m.groupInput, cmd = m.groupInput.Update(msg)
+	return m, cmd
+}
+
+// handleRenameGroupKeys handles keyboard input in the rename group dialog
+func (m Model) handleRenameGroupKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.state = stateList
+		return m, nil
+	case "enter":
+		if m.groupInput.Value() != "" {
+			m.buildVisibleItems()
+			if m.cursor >= 0 && m.cursor < len(m.visibleItems) {
+				item := m.visibleItems[m.cursor]
+				if item.isGroup {
+					if err := m.storage.RenameGroup(item.group.ID, m.groupInput.Value()); err != nil {
+						m.err = err
+					} else {
+						item.group.Name = m.groupInput.Value()
+					}
+				}
+			}
+			m.state = stateList
+			return m, nil
+		}
+	}
+
+	var cmd tea.Cmd
+	m.groupInput, cmd = m.groupInput.Update(msg)
+	return m, cmd
+}
+
+// handleSelectGroupKeys handles keyboard input in the group selection dialog
+func (m Model) handleSelectGroupKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	maxIdx := len(m.groups) // 0 = ungrouped, 1+ = groups
+
+	switch msg.String() {
+	case "esc":
+		m.state = stateList
+		return m, nil
+
+	case "up", "k":
+		if m.groupCursor > 0 {
+			m.groupCursor--
+		}
+
+	case "down", "j":
+		if m.groupCursor < maxIdx {
+			m.groupCursor++
+		}
+
+	case "enter":
+		// Find current session (works in both grouped and ungrouped modes)
+		var inst *session.Instance
+		if len(m.groups) > 0 {
+			m.buildVisibleItems()
+			if m.cursor >= 0 && m.cursor < len(m.visibleItems) {
+				item := m.visibleItems[m.cursor]
+				if !item.isGroup {
+					inst = item.instance
+				}
+			}
+		} else if len(m.instances) > 0 && m.cursor < len(m.instances) {
+			inst = m.instances[m.cursor]
+		}
+
+		if inst != nil {
+			var groupID string
+			if m.groupCursor > 0 && m.groupCursor <= len(m.groups) {
+				groupID = m.groups[m.groupCursor-1].ID
+			}
+			inst.GroupID = groupID
+			m.storage.UpdateInstance(inst)
+			m.buildVisibleItems()
+		}
+		m.state = stateList
 		return m, nil
 	}
 

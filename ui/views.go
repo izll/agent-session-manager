@@ -27,6 +27,12 @@ func (m Model) View() string {
 		return m.colorPickerView()
 	case statePrompt:
 		return m.promptView()
+	case stateNewGroup:
+		return m.newGroupView()
+	case stateRenameGroup:
+		return m.renameGroupView()
+	case stateSelectGroup:
+		return m.selectGroupView()
 	default:
 		return m.listView()
 	}
@@ -150,13 +156,23 @@ func (m Model) helpView() string {
 		keyStyle.Render("r") + descStyle.Render(" resume"),
 		keyStyle.Render("p") + descStyle.Render(" prompt"),
 		keyStyle.Render("c") + descStyle.Render(" color"),
-		keyStyle.Render("l") + descStyle.Render(" compact"),
-		keyStyle.Render("y") + descStyle.Render(" autoyes"),
+		keyStyle.Render("g") + descStyle.Render(" new group"),
+		keyStyle.Render("G") + descStyle.Render(" assign group"),
 	}
 	b.WriteString("  " + strings.Join(featureKeys, "  "))
 	b.WriteString("\n\n")
 
-	// Row 4: Other
+	// Row 4: Toggles
+	toggleKeys := []string{
+		keyStyle.Render("l") + descStyle.Render(" compact"),
+		keyStyle.Render("y") + descStyle.Render(" autoyes"),
+		keyStyle.Render("→") + descStyle.Render(" expand"),
+		keyStyle.Render("←") + descStyle.Render(" collapse"),
+	}
+	b.WriteString("  " + strings.Join(toggleKeys, "  "))
+	b.WriteString("\n\n")
+
+	// Row 5: Other
 	otherKeys := []string{
 		keyStyle.Render("?/F1") + descStyle.Render(" help"),
 		keyStyle.Render("q") + descStyle.Render(" quit"),
@@ -180,6 +196,10 @@ func (m Model) helpView() string {
 		{"r Resume", "Continue a previous Claude conversation"},
 		{"p Prompt", "Send a message to running session without attaching"},
 		{"c Color", "Customize session with colors and gradients"},
+		{"g Group", "Create a new session group for organization"},
+		{"G Assign", "Assign selected session to a group"},
+		{"→ Right", "Expand a collapsed group"},
+		{"← Left", "Collapse an expanded group"},
 		{"l Compact", "Toggle compact view (less spacing between sessions)"},
 		{"y AutoYes", "Toggle --dangerously-skip-permissions flag"},
 	}
@@ -365,10 +385,41 @@ func (m Model) selectSessionView() string {
 func (m Model) colorPickerView() string {
 	var b strings.Builder
 
-	b.WriteString(titleStyle.Render(" Session Color "))
+	// Title based on what we're editing
+	if m.editingGroup != nil {
+		b.WriteString(titleStyle.Render(" Group Color "))
+	} else {
+		b.WriteString(titleStyle.Render(" Session Color "))
+	}
 	b.WriteString("\n\n")
 
-	if len(m.instances) > 0 {
+	// Editing a group
+	if m.editingGroup != nil {
+		group := m.editingGroup
+
+		// Get preview color
+		previewFg := m.previewFg
+		if m.colorCursor < len(colorOptions) {
+			selected := colorOptions[m.colorCursor]
+			previewFg = selected.Color
+		}
+
+		// Show group name with preview color
+		styledName := group.Name
+		if previewFg != "" {
+			nameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(previewFg)).Bold(true)
+			styledName = nameStyle.Render(group.Name)
+		}
+
+		b.WriteString(fmt.Sprintf("  Group: 📁 %s\n", styledName))
+
+		// Show current color
+		fgDisplay := "none"
+		if group.Color != "" {
+			fgDisplay = group.Color
+		}
+		b.WriteString(fmt.Sprintf("  Szín: %s\n\n", fgDisplay))
+	} else if len(m.instances) > 0 {
 		inst := m.instances[m.cursor]
 
 		// Get preview colors (current cursor selection for active mode)
@@ -733,18 +784,24 @@ func (m Model) buildSessionListPane(listWidth, contentHeight int) string {
 	leftPane.WriteString(titleStyle.Render(" Sessions "))
 	leftPane.WriteString("\n\n")
 
-	if len(m.instances) == 0 {
+	if len(m.instances) == 0 && len(m.groups) == 0 {
 		leftPane.WriteString(" No sessions\n")
 		leftPane.WriteString(dimStyle.Render(" Press 'n' to create"))
 		return leftPane.String()
 	}
 
+	// If there are groups, use grouped view
+	if len(m.groups) > 0 {
+		return m.buildGroupedSessionListPane(listWidth, contentHeight)
+	}
+
+	// Otherwise, use flat view (original behavior)
 	// Calculate visible range
 	linesPerSession := 2
 	if !m.compactList {
 		linesPerSession = 3
 	}
-	maxVisible := (contentHeight - 4) / linesPerSession
+	maxVisible := contentHeight / linesPerSession
 	if maxVisible < 3 {
 		maxVisible = 3
 	}
@@ -776,6 +833,213 @@ func (m Model) buildSessionListPane(listWidth, contentHeight int) string {
 	return leftPane.String()
 }
 
+// buildGroupedSessionListPane builds the session list with groups
+func (m *Model) buildGroupedSessionListPane(listWidth, contentHeight int) string {
+	var leftPane strings.Builder
+	leftPane.WriteString("\n")
+	leftPane.WriteString(titleStyle.Render(" Sessions "))
+	leftPane.WriteString("\n\n")
+
+	// Build visible items
+	m.buildVisibleItems()
+
+	if len(m.visibleItems) == 0 {
+		leftPane.WriteString(" No sessions\n")
+		leftPane.WriteString(dimStyle.Render(" Press 'n' to create"))
+		return leftPane.String()
+	}
+
+	// Calculate visible range
+	linesPerItem := 2
+	if !m.compactList {
+		linesPerItem = 3
+	}
+	maxVisible := contentHeight / linesPerItem
+	if maxVisible < 3 {
+		maxVisible = 3
+	}
+
+	startIdx := 0
+	if m.cursor >= maxVisible {
+		startIdx = m.cursor - maxVisible + 1
+	}
+	endIdx := startIdx + maxVisible
+	if endIdx > len(m.visibleItems) {
+		endIdx = len(m.visibleItems)
+	}
+
+	// Show scroll indicator at top
+	if startIdx > 0 {
+		leftPane.WriteString(dimStyle.Render(fmt.Sprintf("  ↑ %d more\n", startIdx)))
+	}
+
+	for i := startIdx; i < endIdx; i++ {
+		item := m.visibleItems[i]
+		if item.isGroup {
+			leftPane.WriteString(m.renderGroupRow(item.group, i, listWidth))
+		} else {
+			// Check if this is the last session in its group
+			isLast := m.isLastInGroup(i)
+			leftPane.WriteString(m.renderGroupedSessionRow(item.instance, i, listWidth, isLast))
+		}
+	}
+
+	// Show scroll indicator at bottom
+	remaining := len(m.visibleItems) - endIdx
+	if remaining > 0 {
+		leftPane.WriteString(dimStyle.Render(fmt.Sprintf("  ↓ %d more\n", remaining)))
+	}
+
+	return leftPane.String()
+}
+
+// renderGroupRow renders a group header row
+func (m Model) renderGroupRow(group *session.Group, index int, listWidth int) string {
+	var row strings.Builder
+
+	// Count sessions in this group
+	sessionCount := len(m.getSessionsInGroup(group.ID))
+
+	// Collapse indicator
+	collapseIcon := "▼"
+	if group.Collapsed {
+		collapseIcon = "▶"
+	}
+
+	// Group style - use custom color if set, otherwise default purple
+	groupColor := "#7D56F4"
+	if group.Color != "" {
+		groupColor = group.Color
+	}
+	groupStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(groupColor)).Bold(true)
+
+	name := group.Name
+	maxNameLen := listWidth - 12
+	if len(name) > maxNameLen {
+		name = name[:maxNameLen-1] + "…"
+	}
+
+	selected := index == m.cursor
+	if selected {
+		row.WriteString(fmt.Sprintf(" %s 📁 %s %s [%d]\n",
+			listSelectedStyle.Render("▸"),
+			collapseIcon,
+			groupStyle.Render(name),
+			sessionCount))
+	} else {
+		row.WriteString(fmt.Sprintf("   📁 %s %s [%d]\n",
+			collapseIcon,
+			groupStyle.Render(name),
+			sessionCount))
+	}
+
+	if !m.compactList {
+		row.WriteString("\n")
+	}
+
+	return row.String()
+}
+
+// renderGroupedSessionRow renders a session row with indent for grouped view
+func (m Model) renderGroupedSessionRow(inst *session.Instance, index int, listWidth int, isLast bool) string {
+	var row strings.Builder
+
+	// Tree connectors for grouped sessions
+	var prefix, lastLinePrefix string
+	if inst.GroupID != "" {
+		if isLast {
+			prefix = "   └─"
+			lastLinePrefix = "     "
+		} else {
+			prefix = "   ├─"
+			lastLinePrefix = "   │"
+		}
+	} else {
+		prefix = "  "
+		lastLinePrefix = "  "
+	}
+
+	// Status indicator based on activity
+	var status string
+	if inst.Status == session.StatusRunning {
+		if m.isActive[inst.ID] {
+			status = activeStyle.Render("●") // Orange - active
+		} else {
+			status = idleStyle.Render("●") // Grey - idle/waiting
+		}
+	} else {
+		status = stoppedStyle.Render("○") // Red outline - stopped
+	}
+
+	// Truncate name to fit (accounting for prefix)
+	name := inst.Name
+	maxNameLen := listWidth - 10
+	if maxNameLen < 8 {
+		maxNameLen = 8
+	}
+	if len(name) > maxNameLen {
+		name = name[:maxNameLen-1] + "…"
+	}
+
+	// Apply session colors
+	styledName := m.getStyledName(inst, name)
+	selected := index == m.cursor
+
+	// Render the row
+	treeStyle := dimStyle
+	if selected {
+		row.WriteString(fmt.Sprintf(" %s%s %s", listSelectedStyle.Render("▸"), treeStyle.Render(prefix[1:]), status))
+		if inst.FullRowColor && inst.BgColor != "" {
+			row.WriteString(" " + m.renderSelectedRowContent(inst, name, listWidth-10))
+		} else if inst.Color != "" || inst.BgColor != "" {
+			row.WriteString(" " + lipgloss.NewStyle().Bold(true).Render(styledName))
+		} else {
+			row.WriteString(" " + lipgloss.NewStyle().Bold(true).Render(name))
+		}
+	} else {
+		row.WriteString(fmt.Sprintf(" %s %s %s", treeStyle.Render(prefix), status, styledName))
+	}
+	row.WriteString("\n")
+
+	// Show last output line with tree connector
+	lastLine := m.getLastLine(inst)
+	row.WriteString(fmt.Sprintf(" %s  └─ %s", treeStyle.Render(lastLinePrefix), lastLine))
+	row.WriteString("\n")
+
+	if !m.compactList {
+		row.WriteString("\n")
+	}
+
+	return row.String()
+}
+
+// renderSelectedRowContent renders the content part of a selected row
+func (m Model) renderSelectedRowContent(inst *session.Instance, name string, maxWidth int) string {
+	if _, isGradient := gradients[inst.Color]; isGradient {
+		padding := maxWidth - len([]rune(name))
+		paddingStr := ""
+		if padding > 0 {
+			paddingStr = lipgloss.NewStyle().Background(lipgloss.Color(inst.BgColor)).Render(strings.Repeat(" ", padding))
+		}
+		gradientText := applyGradientWithBgBold(name, inst.Color, inst.BgColor)
+		return gradientText + paddingStr
+	}
+
+	rowStyle := lipgloss.NewStyle().Background(lipgloss.Color(inst.BgColor)).Bold(true)
+	if inst.Color == "auto" || inst.Color == "" {
+		rowStyle = rowStyle.Foreground(lipgloss.Color(getContrastColor(inst.BgColor)))
+	} else {
+		rowStyle = rowStyle.Foreground(lipgloss.Color(inst.Color))
+	}
+
+	textPart := name
+	padding := maxWidth - len([]rune(name))
+	if padding > 0 {
+		textPart += strings.Repeat(" ", padding)
+	}
+	return rowStyle.Render(textPart)
+}
+
 // buildPreviewPane builds the right pane containing the preview
 func (m Model) buildPreviewPane(contentHeight int) string {
 	var rightPane strings.Builder
@@ -783,11 +1047,32 @@ func (m Model) buildPreviewPane(contentHeight int) string {
 	rightPane.WriteString(titleStyle.Render(" Preview "))
 	rightPane.WriteString("\n\n")
 
-	if len(m.instances) == 0 || m.cursor >= len(m.instances) {
-		return rightPane.String()
+	// Get selected instance (handles both grouped and ungrouped modes)
+	var inst *session.Instance
+	if len(m.groups) > 0 {
+		m.buildVisibleItems()
+		if m.cursor >= 0 && m.cursor < len(m.visibleItems) {
+			item := m.visibleItems[m.cursor]
+			if !item.isGroup {
+				inst = item.instance
+			} else {
+				// Group selected - show group info
+				rightPane.WriteString(dimStyle.Render(fmt.Sprintf("  Group: %s", item.group.Name)))
+				rightPane.WriteString("\n")
+				sessionCount := len(m.getSessionsInGroup(item.group.ID))
+				rightPane.WriteString(dimStyle.Render(fmt.Sprintf("  Sessions: %d", sessionCount)))
+				rightPane.WriteString("\n\n")
+				rightPane.WriteString(dimStyle.Render("  Press Enter to toggle collapse"))
+				return rightPane.String()
+			}
+		}
+	} else if len(m.instances) > 0 && m.cursor < len(m.instances) {
+		inst = m.instances[m.cursor]
 	}
 
-	inst := m.instances[m.cursor]
+	if inst == nil {
+		return rightPane.String()
+	}
 
 	// Instance info
 	rightPane.WriteString(dimStyle.Render(fmt.Sprintf("  Path: %s", inst.Path)))
@@ -859,6 +1144,8 @@ func (m Model) buildStatusBar() string {
 	items = append(items, keyStyle.Render("x")+descStyle.Render(" stop"))
 	items = append(items, keyStyle.Render("d")+descStyle.Render(" delete"))
 	items = append(items, keyStyle.Render("c")+descStyle.Render(" color"))
+	items = append(items, keyStyle.Render("g")+descStyle.Render(" group"))
+	items = append(items, keyStyle.Render("G")+descStyle.Render(" assign"))
 
 	// Compact toggle
 	compactStatus := offStyle.Render("OFF")
@@ -897,4 +1184,87 @@ func formatTimeAgo(t time.Time) string {
 	} else {
 		return fmt.Sprintf("%d days ago", int(duration.Hours()/24))
 	}
+}
+
+// newGroupView renders the new group dialog as an overlay
+func (m Model) newGroupView() string {
+	var boxContent strings.Builder
+	boxContent.WriteString("\n")
+	boxContent.WriteString("  Group Name:\n")
+	boxContent.WriteString("  " + m.groupInput.View() + "\n")
+	boxContent.WriteString("\n")
+	boxContent.WriteString(helpStyle.Render("  enter: create  esc: cancel"))
+	boxContent.WriteString("\n")
+
+	return m.renderOverlayDialog(" New Group ", boxContent.String(), 50, "#7D56F4")
+}
+
+// renameGroupView renders the rename group dialog as an overlay
+func (m Model) renameGroupView() string {
+	var boxContent strings.Builder
+	boxContent.WriteString("\n")
+
+	m.buildVisibleItems()
+	if m.cursor >= 0 && m.cursor < len(m.visibleItems) {
+		item := m.visibleItems[m.cursor]
+		if item.isGroup {
+			boxContent.WriteString(fmt.Sprintf("  Current: %s\n\n", item.group.Name))
+		}
+	}
+
+	boxContent.WriteString("  New Name:\n")
+	boxContent.WriteString("  " + m.groupInput.View() + "\n")
+	boxContent.WriteString("\n")
+	boxContent.WriteString(helpStyle.Render("  enter: confirm  esc: cancel"))
+	boxContent.WriteString("\n")
+
+	return m.renderOverlayDialog(" Rename Group ", boxContent.String(), 50, "#7D56F4")
+}
+
+// selectGroupView renders the group selection dialog as an overlay
+func (m *Model) selectGroupView() string {
+	var boxContent strings.Builder
+	boxContent.WriteString("\n")
+
+	// Find current session (works in both grouped and ungrouped modes)
+	var inst *session.Instance
+	if len(m.groups) > 0 {
+		m.buildVisibleItems()
+		if m.cursor >= 0 && m.cursor < len(m.visibleItems) {
+			item := m.visibleItems[m.cursor]
+			if !item.isGroup {
+				inst = item.instance
+			}
+		}
+	} else if len(m.instances) > 0 && m.cursor < len(m.instances) {
+		inst = m.instances[m.cursor]
+	}
+
+	if inst != nil {
+		boxContent.WriteString(fmt.Sprintf("  Session: %s\n\n", inst.Name))
+	}
+
+	boxContent.WriteString("  Select Group:\n\n")
+
+	// Ungrouped option
+	if m.groupCursor == 0 {
+		boxContent.WriteString("  ❯ (No Group)\n")
+	} else {
+		boxContent.WriteString("    (No Group)\n")
+	}
+
+	// Groups
+	for i, group := range m.groups {
+		if m.groupCursor == i+1 {
+			boxContent.WriteString(fmt.Sprintf("  ❯ 📁 %s\n", group.Name))
+		} else {
+			boxContent.WriteString(fmt.Sprintf("    📁 %s\n", group.Name))
+		}
+	}
+
+	boxContent.WriteString("\n")
+	boxContent.WriteString(helpStyle.Render("  enter: select  esc: cancel"))
+	boxContent.WriteString("\n")
+
+	return m.renderOverlayDialog(" Assign to Group ", boxContent.String(), 50, "#7D56F4")
 }

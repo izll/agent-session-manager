@@ -19,6 +19,7 @@ A powerful terminal UI (TUI) application for managing multiple Claude Code insta
 - **Overlay Dialogs** - Modal dialogs rendered over the main view with proper Unicode character width handling
 - **Fancy Status Bar** - Styled bottom bar with highlighted keys, toggle indicators, and separators
 - **Rich Help View** - Comprehensive help page with keyboard shortcuts and detailed descriptions (F1 or ?)
+- **Session Groups** - Organize sessions into collapsible groups for better organization
 
 ## Installation
 
@@ -75,6 +76,17 @@ csm
 | `p` | Send prompt/message to running session |
 | `d` | Delete session |
 
+#### Groups
+| Key | Action |
+|-----|--------|
+| `g` | Create new group |
+| `G` | Assign session to group |
+| `→` | Expand group (when group selected) |
+| `←` | Collapse group (when group selected) |
+| `Tab` | Toggle group collapse (when group selected) |
+| `e` | Rename group (when group selected) |
+| `d` | Delete group (when group selected) |
+
 #### Customization
 | Key | Action |
 |-----|--------|
@@ -117,6 +129,29 @@ CSM can resume previous Claude Code conversations:
 2. Browse through previous conversations (shows last message and timestamp)
 3. Select a conversation to resume or start fresh
 
+## Session Groups
+
+Organize your sessions into collapsible groups:
+
+```
+📁 Backend ▼ [3]
+   ● api-server
+   ● database-worker
+   ○ cache-service
+📁 Frontend ▶ [2]  (collapsed)
+   ● misc-session
+```
+
+- Press `g` to create a new group
+- Press `G` to assign the selected session to a group
+- Press `→` to expand a group, `←` to collapse it
+- Press `Tab` to toggle collapse/expand
+- Press `e` on a group to rename it
+- Press `c` on a group to change its color
+- Press `d` on a group to delete it (sessions become ungrouped)
+
+Sessions without a group appear at the bottom of the list.
+
 ## Activity Indicators
 
 Sessions show different status indicators:
@@ -127,13 +162,18 @@ Sessions show different status indicators:
 
 ## Configuration
 
-Sessions are stored in `~/.config/claude-session-manager/sessions.json`.
+Sessions and groups are stored in `~/.config/claude-session-manager/sessions.json`.
 
 Each session stores:
 - Name and path
 - Color settings
 - Resume session ID
 - Auto-yes preference
+- Group assignment
+
+Groups store:
+- Name
+- Collapsed state
 
 ## Architecture
 
