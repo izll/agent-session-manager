@@ -1,15 +1,26 @@
 # Claude Session Manager (CSM)
 
-A powerful terminal UI (TUI) application for managing multiple Claude Code instances using tmux. Inspired by [Claude Squad](https://github.com/smtg-ai/claude-squad).
+A powerful terminal UI (TUI) application for managing multiple AI coding assistant CLI sessions using tmux. Inspired by [Claude Squad](https://github.com/smtg-ai/claude-squad).
 
 ![Go](https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat&logo=go)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
 
+## Supported AI Agents
+
+- **Claude Code** - Anthropic's CLI coding assistant
+- **Gemini CLI** - Google's AI assistant
+- **Aider** - AI pair programming in your terminal
+- **OpenAI Codex** - OpenAI's coding assistant
+- **Amazon Q** - AWS AI coding companion
+- **OpenCode** - Open-source AI coding assistant
+- **Custom** - Any CLI command you want to manage
+
 ## Features
 
-- **Multi-Session Management** - Run and manage multiple Claude Code instances simultaneously
-- **Live Preview** - Real-time preview of Claude's output with ANSI color support
-- **Session Resume** - Resume previous Claude conversations from any project
+- **Multi-Agent Support** - Run Claude, Gemini, Aider, Codex, Amazon Q, OpenCode, or custom commands
+- **Multi-Session Management** - Run and manage multiple AI sessions simultaneously
+- **Live Preview** - Real-time preview of agent output with ANSI color support
+- **Session Resume** - Resume previous Claude conversations from any project (Claude-specific)
 - **Activity Indicators** - Visual indicators showing active vs idle sessions
 - **Custom Colors** - Personalize sessions with foreground colors, background colors, and gradients
 - **Prompt Sending** - Send messages to running sessions without attaching
@@ -27,7 +38,13 @@ A powerful terminal UI (TUI) application for managing multiple Claude Code insta
 
 - Go 1.24 or later
 - tmux
-- [Claude Code CLI](https://github.com/anthropics/claude-code) installed and configured
+- At least one AI CLI tool installed:
+  - [Claude Code](https://github.com/anthropics/claude-code)
+  - [Gemini CLI](https://github.com/google-gemini/gemini-cli)
+  - [Aider](https://github.com/paul-gauthier/aider)
+  - [OpenAI Codex](https://github.com/openai/codex)
+  - [Amazon Q](https://aws.amazon.com/q/)
+  - [OpenCode](https://github.com/opencode-ai/opencode)
 
 ### Build from Source
 
@@ -163,18 +180,31 @@ Sessions show different status indicators:
 
 ## Configuration
 
-Sessions and groups are stored in `~/.config/claude-session-manager/sessions.json`.
+Configuration files are stored in `~/.config/claude-session-manager/`:
 
-Each session stores:
-- Name and path
-- Color settings
-- Resume session ID
-- Auto-yes preference
-- Group assignment
+### sessions.json
+Stores sessions and groups:
+- Session: name, path, color settings, resume ID, auto-yes, group, agent type
+- Group: name, collapsed state, color settings
 
-Groups store:
-- Name
-- Collapsed state
+### filters.json (optional)
+Customize status line filtering for each agent. Default filters are built-in, but you can override them:
+
+```json
+{
+  "claude": {
+    "skip_contains": ["? for", "Context left"],
+    "skip_prefixes": ["╭", "╰"],
+    "min_separators": 20
+  },
+  "opencode": {
+    "skip_contains": ["ctrl+?", "Context:"],
+    "content_prefix": "┃",
+    "show_contains": ["Generating"],
+    "show_as": ["Generating..."]
+  }
+}
+```
 
 ## Architecture
 
@@ -199,7 +229,6 @@ claude-session-manager/
 - [Bubble Tea](https://github.com/charmbracelet/bubbletea) - TUI framework
 - [Lip Gloss](https://github.com/charmbracelet/lipgloss) - Style definitions
 - [Bubbles](https://github.com/charmbracelet/bubbles) - TUI components
-- [creack/pty](https://github.com/creack/pty) - PTY handling for tmux resize control
 - [go-runewidth](https://github.com/mattn/go-runewidth) - Unicode character width calculation for overlay dialogs
 
 ## Contributing
