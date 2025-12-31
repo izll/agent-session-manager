@@ -1,0 +1,75 @@
+version: 2
+
+project_name: asmgr
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: asmgr
+    binary: asmgr
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+
+archives:
+  - id: default
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: 'checksums.txt'
+
+nfpms:
+  - id: packages
+    package_name: asmgr
+    vendor: izll
+    homepage: https://github.com/izll/agent-session-manager
+    maintainer: izll
+    description: Terminal UI for managing multiple AI coding assistant CLI sessions
+    license: MIT
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/bin
+
+brews:
+  - repository:
+      owner: izll
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: https://github.com/izll/agent-session-manager
+    description: Terminal UI for managing multiple AI coding assistant CLI sessions
+    license: MIT
+    dependencies:
+      - name: tmux
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+
+release:
+  github:
+    owner: izll
+    name: agent-session-manager
+  draft: false
+  prerelease: auto
