@@ -162,8 +162,8 @@ func (m Model) helpView() string {
 	navKeys := []string{
 		keyStyle.Render("↑/k") + descStyle.Render(" up"),
 		keyStyle.Render("↓/j") + descStyle.Render(" down"),
-		keyStyle.Render("⇧↑/K") + descStyle.Render(" move up"),
-		keyStyle.Render("⇧↓/J") + descStyle.Render(" move down"),
+		keyStyle.Render("^↑") + descStyle.Render(" move"),
+		keyStyle.Render("⇧↑") + descStyle.Render(" scroll"),
 	}
 	b.WriteString("  " + strings.Join(navKeys, "  "))
 	b.WriteString("\n\n")
@@ -238,6 +238,10 @@ func (m Model) helpView() string {
 		{"m Mark", "Mark session for split view (pinned on top)"},
 		{"⇥ Tab", "Switch focus between split panels"},
 		{"U Update", "Download and install new version (if available)"},
+		{"⇧↑/PgUp", "Scroll preview up"},
+		{"⇧↓/PgDn", "Scroll preview down"},
+		{"Home/End", "Jump to top/bottom of preview"},
+		{"Ctrl+↑/↓", "Move session up/down in list"},
 	}
 
 	for _, d := range details {
@@ -1266,16 +1270,22 @@ func (m Model) buildPreviewPane(contentHeight int) string {
 	rightPane.WriteString(dimStyle.Render(fmt.Sprintf("  Agent: %s", agentName)))
 	rightPane.WriteString("\n")
 
+	// Calculate actual header height: Initial(1) + Title(1) + blank(1) + Path(1) + Agent(1) = 5 base + 1 buffer
+	headerLines := 6
+
 	if inst.Agent == session.AgentCustom && inst.CustomCommand != "" {
 		rightPane.WriteString(dimStyle.Render(fmt.Sprintf("  Command: %s", inst.CustomCommand)))
 		rightPane.WriteString("\n")
+		headerLines++
 	}
 
 	if inst.ResumeSessionID != "" {
 		rightPane.WriteString(dimStyle.Render(fmt.Sprintf("  Resume: %s", inst.ResumeSessionID[:8])))
 		rightPane.WriteString("\n")
+		headerLines++
 	}
-	rightPane.WriteString("\n")
+	rightPane.WriteString("\n") // Blank before content
+	headerLines++
 
 	// Preview content
 	if m.preview == "" {
@@ -1283,24 +1293,61 @@ func (m Model) buildPreviewPane(contentHeight int) string {
 		return rightPane.String()
 	}
 
-	lines := strings.Split(m.preview, "\n")
-	maxLines := contentHeight - PreviewHeaderHeight
+	// Use scrollContent if scrolling, otherwise use preview
+	content := m.preview
+	if m.previewScroll > 0 && m.scrollContent != "" {
+		content = m.scrollContent
+	}
+	lines := strings.Split(content, "\n")
+	maxLines := contentHeight - headerLines
 	if maxLines < MinPreviewLines {
 		maxLines = MinPreviewLines
 	}
-	startIdx := len(lines) - maxLines
+
+	// When scrolling, always reserve 2 lines for indicators to prevent layout shift
+	if m.previewScroll > 0 {
+		maxLines -= 2
+	}
+
+	// Apply scroll offset
+	endIdx := len(lines) - m.previewScroll
+	if endIdx < maxLines {
+		endIdx = maxLines
+	}
+	if endIdx > len(lines) {
+		endIdx = len(lines)
+	}
+	startIdx := endIdx - maxLines
 	if startIdx < 0 {
 		startIdx = 0
 	}
-	if startIdx > 0 {
-		rightPane.WriteString(dimStyle.Render("   ..."))
+
+	// Show scroll indicator at top if scrolled and not at beginning
+	if m.previewScroll > 0 && startIdx > 0 {
+		rightPane.WriteString(dimStyle.Render("   ↑ more"))
+		rightPane.WriteString("\n")
+	} else if m.previewScroll > 0 {
+		// Empty line to keep layout stable
 		rightPane.WriteString("\n")
 	}
-	for i := startIdx; i < len(lines); i++ {
+
+	for i := startIdx; i < endIdx; i++ {
 		rightPane.WriteString("  " + lines[i] + "\x1b[0m\n")
 	}
 
-	return rightPane.String()
+	// Show scroll indicator at bottom if scrolled
+	if m.previewScroll > 0 {
+		rightPane.WriteString(dimStyle.Render(fmt.Sprintf("   ↓ more (%d lines)", m.previewScroll)))
+		rightPane.WriteString("\n")
+	}
+
+	// Truncate to exactly contentHeight lines to prevent layout shift
+	result := rightPane.String()
+	resultLines := strings.Split(result, "\n")
+	if len(resultLines) > contentHeight {
+		resultLines = resultLines[:contentHeight]
+	}
+	return strings.Join(resultLines, "\n")
 }
 
 // buildSplitPreviewPane builds split view with two preview panes
@@ -1327,9 +1374,13 @@ func (m Model) buildSplitPreviewPane(contentHeight int) string {
 
 	// Top pane: marked session (pinned)
 	topFocused := m.splitFocus == 1
+	topScroll := 0
+	if topFocused {
+		topScroll = m.previewScroll
+	}
 	if markedInst != nil {
 		result.WriteString("\n") // Add spacing at top
-		result.WriteString(m.buildMiniPreview(markedInst, halfHeight, previewWidth, "Pinned", topFocused))
+		result.WriteString(m.buildMiniPreview(markedInst, halfHeight, previewWidth, "Pinned", topFocused, topScroll))
 	} else {
 		result.WriteString("\n")
 		result.WriteString(dimStyle.Render("  Press 'm' to pin a session"))
@@ -1342,8 +1393,12 @@ func (m Model) buildSplitPreviewPane(contentHeight int) string {
 
 	// Bottom pane: selected session
 	bottomFocused := m.splitFocus == 0
+	bottomScroll := 0
+	if bottomFocused {
+		bottomScroll = m.previewScroll
+	}
 	if selectedInst != nil && (markedInst == nil || selectedInst.ID != markedInst.ID) {
-		result.WriteString(m.buildMiniPreview(selectedInst, halfHeight, previewWidth, "Selected", bottomFocused))
+		result.WriteString(m.buildMiniPreview(selectedInst, halfHeight, previewWidth, "Selected", bottomFocused, bottomScroll))
 	} else if selectedInst != nil {
 		result.WriteString(dimStyle.Render("  (same as pinned)"))
 	}
@@ -1352,7 +1407,7 @@ func (m Model) buildSplitPreviewPane(contentHeight int) string {
 }
 
 // buildMiniPreview builds a compact preview for split view
-func (m Model) buildMiniPreview(inst *session.Instance, height, width int, label string, focused bool) string {
+func (m Model) buildMiniPreview(inst *session.Instance, height, width int, label string, focused bool, scrollOffset int) string {
 	var preview strings.Builder
 
 	if inst == nil {
@@ -1384,7 +1439,12 @@ func (m Model) buildMiniPreview(inst *session.Instance, height, width int, label
 	// Get preview content for this instance
 	content := ""
 	if inst.Status == session.StatusRunning {
-		content, _ = inst.GetPreview(100)
+		// Use scrollContent if scrolling, otherwise fetch normal preview
+		if scrollOffset > 0 && m.scrollContent != "" {
+			content = m.scrollContent
+		} else {
+			content, _ = inst.GetPreview(PreviewLineCount)
+		}
 	}
 
 	maxLines := height - 2 // -2 for header and margin
@@ -1402,17 +1462,40 @@ func (m Model) buildMiniPreview(inst *session.Instance, height, width int, label
 		return preview.String()
 	}
 
-	// Show last lines
+	// Apply scroll offset (similar to buildPreviewPane)
 	lines := strings.Split(content, "\n")
-	startIdx := len(lines) - maxLines
+	endIdx := len(lines) - scrollOffset
+	if endIdx < maxLines {
+		endIdx = maxLines
+	}
+	if endIdx > len(lines) {
+		endIdx = len(lines)
+	}
+	startIdx := endIdx - maxLines
 	if startIdx < 0 {
 		startIdx = 0
 	}
+
+	// Show scroll indicator at top if not at beginning
+	if startIdx > 0 {
+		preview.WriteString(dimStyle.Render("   ↑ more"))
+		preview.WriteString("\n")
+		maxLines-- // Account for indicator line
+	}
+
 	displayedLines := 0
-	for i := startIdx; i < len(lines); i++ {
+	for i := startIdx; i < endIdx && displayedLines < maxLines; i++ {
 		preview.WriteString("  " + lines[i] + "\x1b[0m\n")
 		displayedLines++
 	}
+
+	// Show scroll indicator at bottom if scrolled
+	if scrollOffset > 0 {
+		preview.WriteString(dimStyle.Render(fmt.Sprintf("   ↓ more (%d lines)", scrollOffset)))
+		preview.WriteString("\n")
+		displayedLines++
+	}
+
 	// Fill remaining lines with empty space
 	for i := displayedLines; i < maxLines; i++ {
 		preview.WriteString("\n")

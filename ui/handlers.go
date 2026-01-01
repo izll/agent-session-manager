@@ -149,6 +149,40 @@ func (m *Model) saveSettings() {
 	})
 }
 
+// getScrollableContent returns the content to use for scrolling
+func (m *Model) getScrollableContent() string {
+	if m.scrollContent != "" {
+		return m.scrollContent
+	}
+	return m.preview
+}
+
+// resetScroll resets scroll state when changing sessions
+func (m *Model) resetScroll() {
+	m.previewScroll = 0
+	m.scrollContent = ""
+}
+
+// getPreviewMaxLines returns the maximum number of lines visible in the preview pane
+func (m *Model) getPreviewMaxLines() int {
+	contentHeight := m.height - 1
+	if m.splitView {
+		// In split view, each pane gets half the height
+		halfHeight := (contentHeight - 1) / 2
+		maxLines := halfHeight - 2 // -2 for header and margin in buildMiniPreview
+		if maxLines < 2 {
+			maxLines = 2
+		}
+		return maxLines
+	}
+	// Normal view
+	maxLines := contentHeight - PreviewHeaderHeight
+	if maxLines < MinPreviewLines {
+		maxLines = MinPreviewLines
+	}
+	return maxLines
+}
+
 // navigatePinned changes the pinned session in split view
 func (m *Model) navigatePinned(direction int) {
 	if len(m.instances) == 0 {
@@ -418,10 +452,12 @@ func (m Model) handleListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.buildVisibleItems()
 			if m.cursor > 0 {
 				m.cursor--
+				m.resetScroll()
 				m.resizeSelectedPane()
 			}
 		} else if m.cursor > 0 {
 			m.cursor--
+			m.resetScroll()
 			m.resizeSelectedPane()
 		}
 
@@ -434,18 +470,73 @@ func (m Model) handleListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.buildVisibleItems()
 			if m.cursor < len(m.visibleItems)-1 {
 				m.cursor++
+				m.resetScroll()
 				m.resizeSelectedPane()
 			}
 		} else if m.cursor < len(m.instances)-1 {
 			m.cursor++
+			m.resetScroll()
 			m.resizeSelectedPane()
 		}
 
-	case "shift+up", "K":
+	case "ctrl+up":
 		m.handleMoveSessionUp()
 
-	case "shift+down", "J":
+	case "ctrl+down":
 		m.handleMoveSessionDown()
+
+	case "shift+up", "pgup", "shift+pgup", "K":
+		// Scroll preview up - fetch extended content on first scroll
+		if m.scrollContent == "" {
+			inst := m.getSelectedInstance()
+			if inst != nil && inst.Status == session.StatusRunning {
+				m.scrollContent, _ = inst.GetPreview(ScrollbackLines)
+			}
+		}
+		content := m.getScrollableContent()
+		if content == "" {
+			break
+		}
+		lines := strings.Split(content, "\n")
+		maxLines := m.getPreviewMaxLines()
+		maxScroll := len(lines) - maxLines
+		if maxScroll < 0 {
+			maxScroll = 0
+		}
+		m.previewScroll += 5
+		if m.previewScroll > maxScroll {
+			m.previewScroll = maxScroll
+		}
+
+	case "shift+down", "pgdown", "shift+pgdown", "J":
+		// Scroll preview down
+		m.previewScroll -= 5
+		if m.previewScroll < 0 {
+			m.previewScroll = 0
+		}
+
+	case "home":
+		// Scroll to top of preview - fetch extended content
+		if m.scrollContent == "" {
+			inst := m.getSelectedInstance()
+			if inst != nil && inst.Status == session.StatusRunning {
+				m.scrollContent, _ = inst.GetPreview(ScrollbackLines)
+			}
+		}
+		content := m.getScrollableContent()
+		if content == "" {
+			break
+		}
+		lines := strings.Split(content, "\n")
+		maxLines := m.getPreviewMaxLines()
+		maxScroll := len(lines) - maxLines
+		if maxScroll > 0 {
+			m.previewScroll = maxScroll
+		}
+
+	case "end":
+		// Scroll to bottom of preview
+		m.previewScroll = 0
 
 	case "enter":
 		// Check if a group is selected

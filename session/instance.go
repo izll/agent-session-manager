@@ -388,23 +388,17 @@ func (i *Instance) GetPreview(lines int) (string, error) {
 	}
 
 	sessionName := i.TmuxSessionName()
-	// Capture visible pane with colors (-e flag)
-	cmd := exec.Command("tmux", "capture-pane", "-t", sessionName, "-p", "-e")
+	// Capture pane with scrollback history (-S for start line, -E for end)
+	// -S -lines means start from 'lines' back in history
+	// -e preserves colors
+	startLine := fmt.Sprintf("-%d", lines)
+	cmd := exec.Command("tmux", "capture-pane", "-t", sessionName, "-p", "-e", "-S", startLine)
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("failed to capture pane: %w", err)
 	}
 
-	// Get all lines
-	allLines := strings.Split(strings.TrimRight(string(output), "\n"), "\n")
-
-	// Take last N lines
-	startIdx := len(allLines) - lines
-	if startIdx < 0 {
-		startIdx = 0
-	}
-
-	return strings.Join(allLines[startIdx:], "\n"), nil
+	return strings.TrimRight(string(output), "\n"), nil
 }
 
 // GetLastLine returns the last non-empty line of output (for status display)

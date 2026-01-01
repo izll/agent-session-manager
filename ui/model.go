@@ -18,7 +18,7 @@ type updateDoneMsg struct{ err error }
 // Version info
 const (
 	AppName    = "asmgr"
-	AppVersion = "0.2.0"
+	AppVersion = "0.2.1"
 )
 
 // Layout constants
@@ -34,7 +34,8 @@ const (
 	ColorPickerHeader    = 12  // Height of color picker header
 	MinColorPickerRows   = 5   // Minimum visible color options
 	SessionListMaxItems  = 8   // Max visible items in session selector
-	PreviewLineCount     = 100 // Number of lines to capture for preview
+	PreviewLineCount     = 100  // Number of lines to capture for preview
+	ScrollbackLines      = 1000 // Number of lines for scroll history
 	GradientColorCount   = 15  // Number of gradient options (for background exclusion)
 	PromptMinWidth       = 50  // Minimum prompt input width
 	PromptMaxWidth       = 70  // Maximum prompt input width
@@ -107,6 +108,8 @@ type Model struct {
 	customCmdInput  textinput.Model           // Input for custom command
 	tickCount       int                       // Counter for slow tick (update others every 5th tick)
 	updateAvailable string                    // New version available (empty if up to date)
+	previewScroll   int                       // Preview scroll offset (0 = bottom, positive = scroll up)
+	scrollContent   string                    // Extended content for scrolling (fetched on demand)
 }
 
 // visibleItem represents an item in the flattened list view (group header or session)
