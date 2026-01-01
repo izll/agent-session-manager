@@ -245,7 +245,7 @@ func (m Model) helpView() string {
 	b.WriteString(separatorStyle.Render("  " + strings.Repeat("─", 60)))
 	b.WriteString("\n\n")
 
-	b.WriteString(infoStyle.Render("  Agent Session Manager (ASMGR) v0.1.0"))
+	b.WriteString(infoStyle.Render(fmt.Sprintf("  Agent Session Manager (%s) v%s", strings.ToUpper(AppName), AppVersion)))
 	b.WriteString("\n")
 	b.WriteString(infoStyle.Render("  Manage multiple AI coding agents"))
 	b.WriteString("\n")
@@ -1128,7 +1128,18 @@ func (m Model) renderSelectedRowContent(inst *session.Instance, name string, max
 func (m Model) buildPreviewPane(contentHeight int) string {
 	var rightPane strings.Builder
 	rightPane.WriteString("\n")
-	rightPane.WriteString(titleStyle.Render(" Preview "))
+
+	// Header with Preview title on left and version on right
+	previewWidth := m.calculatePreviewWidth()
+	title := titleStyle.Render(" Preview ")
+	version := dimStyle.Render(fmt.Sprintf("%s v%s ", AppName, AppVersion))
+	titleLen := lipgloss.Width(title)
+	versionLen := lipgloss.Width(version)
+	spacing := previewWidth - titleLen - versionLen
+	if spacing < 1 {
+		spacing = 1
+	}
+	rightPane.WriteString(title + strings.Repeat(" ", spacing) + version)
 	rightPane.WriteString("\n\n")
 
 	// Get selected instance (handles both grouped and ungrouped modes)

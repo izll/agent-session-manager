@@ -10,6 +10,12 @@ import (
 	"github.com/izll/agent-session-manager/session"
 )
 
+// Version info
+const (
+	AppName    = "asmgr"
+	AppVersion = "0.1.1"
+)
+
 // Layout constants
 const (
 	ListPaneWidth        = 45  // Fixed width for session list panel
