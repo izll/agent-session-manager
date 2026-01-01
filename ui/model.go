@@ -18,7 +18,7 @@ type updateDoneMsg struct{ err error }
 // Version info
 const (
 	AppName    = "asmgr"
-	AppVersion = "0.1.6"
+	AppVersion = "0.2.0"
 )
 
 // Layout constants
