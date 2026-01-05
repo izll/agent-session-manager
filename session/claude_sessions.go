@@ -220,3 +220,82 @@ func truncateString(s string, maxLen int) string {
 	}
 	return string(runes[:maxLen-1]) + "…"
 }
+
+// GetClaudeStatusLine handles Claude Code's special UI with horizontal separator lines.
+// If the input area (between two horizontal lines) has only 1 line (the prompt),
+// it returns the content above the top separator instead of the prompt line.
+func GetClaudeStatusLine(lines []string, stripANSIFunc func(string) string) string {
+	// Find horizontal line positions (lines with many ─ or ━ characters)
+	var separatorIndices []int
+	for idx, line := range lines {
+		cleanLine := strings.TrimSpace(stripANSIFunc(line))
+		sepCount := strings.Count(cleanLine, "─") + strings.Count(cleanLine, "━")
+		if sepCount > 20 {
+			separatorIndices = append(separatorIndices, idx)
+		}
+	}
+
+	// Need at least 2 separators to detect input area
+	if len(separatorIndices) < 2 {
+		return ""
+	}
+
+	// Get the last two separators (they form the input area boundary)
+	topSepIdx := separatorIndices[len(separatorIndices)-2]
+	bottomSepIdx := separatorIndices[len(separatorIndices)-1]
+
+	// Count non-empty lines between separators
+	contentLinesBetween := 0
+	for idx := topSepIdx + 1; idx < bottomSepIdx; idx++ {
+		cleanLine := strings.TrimSpace(stripANSIFunc(lines[idx]))
+		if cleanLine != "" {
+			contentLinesBetween++
+		}
+	}
+
+	// If only 1 line between separators (the prompt line), get content above top separator
+	if contentLinesBetween <= 1 {
+		// Search upward from top separator for meaningful content
+		for j := topSepIdx - 1; j >= 0; j-- {
+			line := lines[j]
+			cleanLine := strings.TrimSpace(stripANSIFunc(line))
+			if cleanLine == "" {
+				continue
+			}
+
+			// Skip separator lines
+			sepCount := strings.Count(cleanLine, "─") + strings.Count(cleanLine, "━")
+			if sepCount > 20 {
+				continue
+			}
+
+			// Skip UI elements
+			if strings.HasPrefix(cleanLine, "╭") || strings.HasPrefix(cleanLine, "╰") {
+				continue
+			}
+
+			// Found actual content above input area
+			return line
+		}
+	} else {
+		// Multiple lines between separators - get content from input area (bottom to top)
+		for j := bottomSepIdx - 1; j > topSepIdx; j-- {
+			line := lines[j]
+			cleanLine := strings.TrimSpace(stripANSIFunc(line))
+			if cleanLine == "" {
+				continue
+			}
+
+			// Skip prompt-only lines (just ">")
+			if cleanLine == ">" || strings.HasPrefix(cleanLine, "> ") {
+				continue
+			}
+
+			// Found actual content in input area
+			return line
+		}
+	}
+
+	// No content found - return empty for fallback processing
+	return ""
+}

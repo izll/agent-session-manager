@@ -20,6 +20,9 @@ var (
 	activeStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FFA500")) // Orange for activity
 
+	waitingStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#00CED1")) // Cyan/turquoise for waiting (needs input)
+
 	idleStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#888888")) // Grey for idle
 

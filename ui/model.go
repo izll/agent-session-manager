@@ -28,7 +28,7 @@ type rpmDownloadDoneMsg struct {
 // Version info
 const (
 	AppName    = "asmgr"
-	AppVersion = "0.3.7"
+	AppVersion = "0.3.8"
 )
 
 // Layout constants
@@ -110,9 +110,10 @@ type Model struct {
 	pendingInstance     *session.Instance         // Instance being created
 	isParallelSession   bool                      // True if creating parallel session (don't show resume)
 	parallelOriginalID  string                    // Original instance ID when creating parallel session
-	lastLines           map[string]string         // Last output line for each instance (by ID)
-	prevContent     map[string]string         // Previous content hash to detect activity
-	isActive        map[string]bool           // Whether instance has recent activity
+	lastLines           map[string]string                   // Last output line for each instance (by ID)
+	prevContent     map[string]string                   // Previous content hash to detect activity
+	isActive        map[string]bool                     // Whether instance has recent activity
+	activityState   map[string]session.SessionActivity  // Activity state (idle/busy/waiting)
 	colorCursor     int                       // Cursor for color picker
 	colorMode       int                       // 0 = foreground, 1 = background
 	previewFg       string                    // Preview foreground color
@@ -218,6 +219,7 @@ func NewModel() (Model, error) {
 		lastLines:       make(map[string]string),
 		prevContent:     make(map[string]string),
 		isActive:        make(map[string]bool),
+		activityState:   make(map[string]session.SessionActivity),
 	}
 
 	// Sessions will be loaded when user selects a project via switchToProject
@@ -520,8 +522,12 @@ func (m Model) handleTick() (tea.Model, tea.Cmd) {
 				m.isActive[inst.ID] = false
 			}
 			m.prevContent[inst.ID] = currentLine
+
+			// Detect detailed activity state (busy/waiting/idle)
+			m.activityState[inst.ID] = inst.DetectActivity()
 		} else {
 			m.isActive[inst.ID] = false
+			m.activityState[inst.ID] = session.ActivityIdle
 		}
 	}
 
@@ -761,6 +767,7 @@ func (m *Model) switchToProject(project *session.Project) error {
 	m.lastLines = make(map[string]string)
 	m.prevContent = make(map[string]string)
 	m.isActive = make(map[string]bool)
+	m.activityState = make(map[string]session.SessionActivity)
 
 	// Initialize status and last lines for all instances
 	for _, inst := range m.instances {

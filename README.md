@@ -48,7 +48,19 @@ A powerful terminal UI (TUI) application for managing multiple AI coding assista
   - [Amazon Q](https://aws.amazon.com/q/)
   - [OpenCode](https://github.com/opencode-ai/opencode)
 
-### Quick Install (Recommended)
+### Homebrew (macOS/Linux)
+
+```bash
+brew tap izll/tap
+brew install asmgr
+```
+
+Update:
+```bash
+brew upgrade asmgr
+```
+
+### Quick Install Script (Linux)
 
 Download and install the latest release automatically:
 
@@ -67,9 +79,25 @@ chmod +x install.sh
 Install options:
 ```bash
 ./install.sh              # Install latest version to ~/.local/bin
-./install.sh -v 0.3.6     # Install specific version
+./install.sh -v 0.3.7     # Install specific version
 ./install.sh -d /usr/local/bin  # Install to custom directory
 ./install.sh -u           # Update existing installation
+```
+
+### Package Managers
+
+**Debian/Ubuntu (.deb):**
+```bash
+# Download from releases
+wget https://github.com/izll/agent-session-manager/releases/download/v0.3.7/asmgr_0.3.7_linux_amd64.deb
+sudo dpkg -i asmgr_0.3.7_linux_amd64.deb
+```
+
+**RedHat/Fedora/Rocky (.rpm):**
+```bash
+# Download from releases
+wget https://github.com/izll/agent-session-manager/releases/download/v0.3.7/asmgr_0.3.7_linux_x86_64.rpm
+sudo rpm -i asmgr_0.3.7_linux_x86_64.rpm
 ```
 
 ### Build from Source
@@ -81,6 +109,46 @@ git clone https://github.com/izll/agent-session-manager.git
 cd agent-session-manager
 go build -o asmgr .
 cp asmgr ~/.local/bin/
+```
+
+## Updating
+
+### Built-in Self-Update
+
+ASMGR includes a built-in self-update feature. Simply press `U` (Shift+U) while running the application:
+
+1. A gold `↑` arrow appears in the top-right corner when an update is available
+2. Press `U` to check for updates
+3. Confirm the update with `Y`
+4. The update is downloaded and installed automatically
+5. Restart ASMGR to use the new version
+
+**Supported installation methods:**
+- ✅ **Homebrew** - Updates via `brew upgrade asmgr`
+- ✅ **Debian/Ubuntu (.deb)** - Interactive `sudo dpkg -i` update
+- ✅ **RedHat/Fedora/Rocky (.rpm)** - Interactive `sudo rpm -Uvh` update
+- ✅ **Install script (tar.gz)** - Self-update with automatic binary replacement
+- ✅ **Manual install (tar.gz)** - Self-update if installed to user directory
+
+### Manual Update
+
+**Homebrew:**
+```bash
+brew upgrade asmgr
+```
+
+**Package managers:**
+```bash
+# Debian/Ubuntu
+sudo apt update && sudo apt upgrade asmgr
+
+# RedHat/Fedora
+sudo dnf upgrade asmgr
+```
+
+**Install script:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/izll/agent-session-manager/main/install.sh | bash -s -- -u
 ```
 
 ## Usage
@@ -145,6 +213,7 @@ asmgr
 #### Other
 | Key | Action |
 |-----|--------|
+| `U` | Check for updates and install (built-in self-update) |
 | `R` | Force resize preview pane |
 | `F1` / `?` | Show help |
 | `q` | Quit |

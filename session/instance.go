@@ -498,7 +498,21 @@ func (i *Instance) GetLastLine() string {
 
 	lines := strings.Split(strings.TrimRight(string(output), "\n"), "\n")
 
-	// Find last meaningful line
+	agentName := string(i.Agent)
+	if agentName == "" {
+		agentName = "claude"
+	}
+
+	// Claude Code special handling: detect input area between horizontal lines
+	if agentName == "claude" {
+		result := GetClaudeStatusLine(lines, stripANSI)
+		if result != "" {
+			return result
+		}
+	}
+
+	// Find last meaningful line (for other agents or fallback)
+	agentFilters := filters.LoadFilters()
 	for j := len(lines) - 1; j >= 0; j-- {
 		line := lines[j]
 		// Strip ANSI codes for checking
@@ -506,13 +520,6 @@ func (i *Instance) GetLastLine() string {
 		// Skip empty lines
 		if cleanLine == "" {
 			continue
-		}
-
-		// Agent-specific filtering using configurable filters
-		agentFilters := filters.LoadFilters()
-		agentName := string(i.Agent)
-		if agentName == "" {
-			agentName = "claude"
 		}
 
 		if config, ok := agentFilters[agentName]; ok {

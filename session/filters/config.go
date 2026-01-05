@@ -144,7 +144,7 @@ func getDefaultFilters() AgentFilters {
 	return AgentFilters{
 		"claude": {
 			SkipContains:  []string{"? for", "Context left", "accept edits"},
-			SkipPrefixes:  []string{"╭", "╰"},
+			SkipPrefixes:  []string{"╭", "╰", "> ", ">"},
 			SkipExact:     []string{">"},
 			MinSeparators: 20,
 		},

@@ -805,13 +805,20 @@ func (m Model) promptView() string {
 func (m Model) renderSessionRow(inst *session.Instance, index int, listWidth int) string {
 	var row strings.Builder
 
-	// Status indicator based on activity
+	// Status indicator based on activity state
 	var status string
 	if inst.Status == session.StatusRunning {
-		if m.isActive[inst.ID] {
-			status = activeStyle.Render("●") // Orange - active
-		} else {
-			status = idleStyle.Render("●") // Grey - idle/waiting
+		switch m.activityState[inst.ID] {
+		case session.ActivityBusy:
+			status = activeStyle.Render("●") // Orange - busy/working
+		case session.ActivityWaiting:
+			status = waitingStyle.Render("●") // Yellow - waiting for input
+		default:
+			if m.isActive[inst.ID] {
+				status = activeStyle.Render("●") // Orange - active
+			} else {
+				status = idleStyle.Render("●") // Grey - idle
+			}
 		}
 	} else {
 		status = stoppedStyle.Render("○") // Red outline - stopped
@@ -1238,13 +1245,20 @@ func (m Model) renderGroupedSessionRow(inst *session.Instance, index int, listWi
 		lastLinePrefix = ""
 	}
 
-	// Status indicator based on activity
+	// Status indicator based on activity state
 	var status string
 	if inst.Status == session.StatusRunning {
-		if m.isActive[inst.ID] {
-			status = activeStyle.Render("●") // Orange - active
-		} else {
-			status = idleStyle.Render("●") // Grey - idle/waiting
+		switch m.activityState[inst.ID] {
+		case session.ActivityBusy:
+			status = activeStyle.Render("●") // Orange - busy/working
+		case session.ActivityWaiting:
+			status = waitingStyle.Render("●") // Yellow - waiting for input
+		default:
+			if m.isActive[inst.ID] {
+				status = activeStyle.Render("●") // Orange - active
+			} else {
+				status = idleStyle.Render("●") // Grey - idle
+			}
 		}
 	} else {
 		status = stoppedStyle.Render("○") // Red outline - stopped
