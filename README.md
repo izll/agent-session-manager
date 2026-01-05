@@ -39,7 +39,6 @@ A powerful terminal UI (TUI) application for managing multiple AI coding assista
 
 ### Prerequisites
 
-- Go 1.24 or later
 - tmux
 - At least one AI CLI tool installed:
   - [Claude Code](https://github.com/anthropics/claude-code)
@@ -49,21 +48,39 @@ A powerful terminal UI (TUI) application for managing multiple AI coding assista
   - [Amazon Q](https://aws.amazon.com/q/)
   - [OpenCode](https://github.com/opencode-ai/opencode)
 
+### Quick Install (Recommended)
+
+Download and install the latest release automatically:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/izll/agent-session-manager/main/install.sh | bash
+```
+
+Or download and run locally:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/izll/agent-session-manager/main/install.sh -o install.sh
+chmod +x install.sh
+./install.sh
+```
+
+Install options:
+```bash
+./install.sh              # Install latest version to ~/.local/bin
+./install.sh -v 0.3.6     # Install specific version
+./install.sh -d /usr/local/bin  # Install to custom directory
+./install.sh -u           # Update existing installation
+```
+
 ### Build from Source
+
+If you prefer to build from source (requires Go 1.24+):
 
 ```bash
 git clone https://github.com/izll/agent-session-manager.git
 cd agent-session-manager
 go build -o asmgr .
-```
-
-### Install to PATH
-
-```bash
-# Linux/macOS
 cp asmgr ~/.local/bin/
-# or
-sudo cp asmgr /usr/local/bin/
 ```
 
 ## Usage
