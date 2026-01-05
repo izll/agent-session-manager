@@ -305,16 +305,33 @@ func (m *Model) handleResumeSession() error {
 	if inst == nil {
 		return nil
 	}
-	sessions, err := session.ListClaudeSessions(inst.Path)
+	// List sessions based on agent type
+	var sessions []session.AgentSession
+	var err error
+
+	switch inst.Agent {
+	case session.AgentGemini:
+		sessions, err = session.ListGeminiSessions(inst.Path)
+	case session.AgentCodex:
+		sessions, err = session.ListCodexSessions(inst.Path)
+	case session.AgentOpenCode:
+		sessions, err = session.ListOpenCodeSessions(inst.Path)
+	case session.AgentAmazonQ:
+		sessions, err = session.ListAmazonQSessions(inst.Path)
+	default:
+		// Claude and others
+		sessions, err = session.ListAgentSessions(inst.Path)
+	}
+
 	if err != nil {
 		return err
 	}
 	if len(sessions) == 0 {
-		return fmt.Errorf("no previous Claude sessions found for this path")
+		return fmt.Errorf("no previous %s sessions found", inst.Agent)
 	}
-	m.claudeSessions = sessions
-	m.sessionCursor = 0
-	m.state = stateSelectClaudeSession
+	m.agentSessions = sessions
+	m.sessionCursor = 1 // Start with first session selected (0 is "new session")
+	m.state = stateSelectAgentSession
 	return nil
 }
 
@@ -577,22 +594,30 @@ func (m Model) handleListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "r":
-		// Resume only works for Claude agent
+		// Resume only works for agents that support it
 		if inst := m.getSelectedInstance(); inst != nil {
 			config := inst.GetAgentConfig()
 			if !config.SupportsResume {
 				m.err = fmt.Errorf("resume not supported for %s agent", inst.Agent)
+				m.previousState = m.state // Save current state to return after error
 				m.state = stateError
 				return m, nil
 			}
 		}
 		if err := m.handleResumeSession(); err != nil {
 			m.err = err
+			m.previousState = m.state // Save current state to return after error
 			m.state = stateError
 		}
 
 	case "s":
 		m.handleStartSession()
+
+	case "a":
+		// Auto-start with confirmation (restart if already running)
+		if inst := m.getSelectedInstance(); inst != nil {
+			m.state = stateConfirmStart
+		}
 
 	case "x":
 		m.handleStopSession()
@@ -826,23 +851,40 @@ func (m Model) handleNewNameKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
-			// Check for existing Claude sessions (only for Claude agent)
-			if m.pendingAgent == session.AgentClaude {
-				sessions, err := session.ListClaudeSessions(inst.Path)
+			// Check for existing agent sessions (for agents that support resume)
+			agentConfig := session.AgentConfigs[m.pendingAgent]
+			if agentConfig.SupportsResume {
+				var sessions []session.AgentSession
+				var err error
+
+				switch m.pendingAgent {
+				case session.AgentGemini:
+					sessions, err = session.ListGeminiSessions(inst.Path)
+				case session.AgentCodex:
+					sessions, err = session.ListCodexSessions(inst.Path)
+				case session.AgentOpenCode:
+					sessions, err = session.ListOpenCodeSessions(inst.Path)
+				case session.AgentAmazonQ:
+					sessions, err = session.ListAmazonQSessions(inst.Path)
+				default:
+					// Claude and others
+					sessions, err = session.ListAgentSessions(inst.Path)
+				}
+
 				if err != nil {
 					// Non-fatal: just continue without session selection
 					sessions = nil
 				}
 				if len(sessions) > 0 {
 					m.pendingInstance = inst
-					m.claudeSessions = sessions
-					m.sessionCursor = 0
-					m.state = stateSelectClaudeSession
+					m.agentSessions = sessions
+					m.sessionCursor = 1 // Start with first session selected (0 is "new session")
+					m.state = stateSelectAgentSession
 					return m, nil
 				}
 			}
 
-			// No existing sessions or non-Claude agent, just create new
+			// No existing sessions or agent doesn't support resume, just create new
 			if err := m.storage.AddInstance(inst); err != nil {
 				m.err = err
 				m.state = stateList
@@ -911,11 +953,11 @@ func (m Model) handleNewPathKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // handleSelectSessionKeys handles keyboard input in the Claude session selector
 func (m Model) handleSelectSessionKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	maxIdx := len(m.claudeSessions) // max index (0 = new session, 1+ = existing sessions)
+	maxIdx := len(m.agentSessions) // max index (0 = new session, 1+ = existing sessions)
 
 	switch msg.String() {
-	case "esc":
-		m.claudeSessions = nil
+	case "q", "esc":
+		m.agentSessions = nil
 		m.pendingInstance = nil
 		m.state = stateList
 		return m, nil
@@ -952,9 +994,9 @@ func (m Model) handleSelectSessionKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "enter":
 		var resumeID string
-		if m.sessionCursor > 0 && m.sessionCursor <= len(m.claudeSessions) {
+		if m.sessionCursor > 0 && m.sessionCursor <= len(m.agentSessions) {
 			// Selected an existing session
-			resumeID = m.claudeSessions[m.sessionCursor-1].SessionID
+			resumeID = m.agentSessions[m.sessionCursor-1].SessionID
 		}
 		// sessionCursor == 0 means "Start new session"
 
@@ -967,7 +1009,7 @@ func (m Model) handleSelectSessionKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.err = err
 				m.state = stateList
 				m.pendingInstance = nil
-				m.claudeSessions = nil
+				m.agentSessions = nil
 				return m, nil
 			}
 
@@ -1007,7 +1049,7 @@ func (m Model) handleSelectSessionKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		m.claudeSessions = nil
+		m.agentSessions = nil
 		m.state = stateList
 		return m, nil
 	}
@@ -1038,6 +1080,42 @@ func (m Model) handleConfirmDeleteKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.state = stateList
 	case "n", "N", "esc":
 		m.deleteTarget = nil
+		m.state = stateList
+	}
+	return m, nil
+}
+
+// handleConfirmStartKeys handles keyboard input in the auto-start confirmation dialog
+func (m Model) handleConfirmStartKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "y", "Y":
+		inst := m.getSelectedInstance()
+		if inst != nil {
+			// Stop if already running
+			if inst.Status == session.StatusRunning {
+				inst.Stop()
+			}
+
+			// Clear any resume session ID to ensure we start fresh
+			inst.ResumeSessionID = ""
+
+			// Check if command exists before starting
+			if err := session.CheckAgentCommand(inst); err != nil {
+				m.err = err
+				m.state = stateError
+				return m, nil
+			}
+
+			// Start completely new session (no resume)
+			if err := inst.Start(); err != nil {
+				m.err = err
+				m.state = stateError
+			} else {
+				m.storage.UpdateInstance(inst)
+			}
+		}
+		m.state = stateList
+	case "n", "N", "esc":
 		m.state = stateList
 	}
 	return m, nil
@@ -1083,13 +1161,10 @@ func (m Model) handlePromptKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		if m.promptInput.Value() != "" {
 			if inst := m.getSelectedInstance(); inst != nil && inst.Status == session.StatusRunning {
-				// Send the text followed by Enter
+				// Send prompt text followed by Enter in a single command
 				text := m.promptInput.Value()
-				if err := inst.SendKeys(text); err != nil {
+				if err := inst.SendPrompt(text); err != nil {
 					m.err = err
-				} else {
-					// Send Enter key
-					inst.SendKeys("Enter")
 				}
 			}
 			m.state = stateList

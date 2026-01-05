@@ -20,9 +20,9 @@ A powerful terminal UI (TUI) application for managing multiple AI coding assista
 - **Projects/Workspaces** - Organize sessions into separate projects with isolated session lists
 - **Single Instance Lock** - Only one instance of ASMGR can run per project at a time
 - **Multi-Agent Support** - Run Claude, Gemini, Aider, Codex, Amazon Q, OpenCode, or custom commands
-- **Multi-Session Management** - Run and manage multiple AI sessions simultaneously
+- **Multi-Session Management** - Run and manage multiple AI sessions simultaneously (multiple sessions can run in the same directory)
 - **Live Preview** - Real-time preview of agent output with ANSI color support
-- **Session Resume** - Resume previous Claude conversations from any project (Claude-specific)
+- **Session Resume** - Resume previous conversations for Claude, Gemini, Codex, OpenCode, and Amazon Q
 - **Activity Indicators** - Visual indicators showing active vs idle sessions
 - **Custom Colors** - Personalize sessions with foreground colors, background colors, and gradients
 - **Prompt Sending** - Send messages to running sessions without attaching
@@ -88,10 +88,11 @@ asmgr
 |-----|--------|
 | `Enter` | Start (if stopped) and attach to session |
 | `s` | Start session without attaching |
+| `a` | Start NEW session with confirmation (stops current if running) |
 | `x` | Stop session |
-| `n` | Create new session |
+| `n` | Create new session instance |
 | `e` | Rename session |
-| `r` | Resume previous Claude conversation |
+| `r` | Resume previous conversation or start new (supports Claude, Gemini, Codex, OpenCode, Amazon Q) |
 | `p` | Send prompt/message to running session |
 | `d` | Delete session |
 

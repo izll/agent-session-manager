@@ -11,15 +11,6 @@ import (
 	"time"
 )
 
-type ClaudeSession struct {
-	SessionID   string    `json:"session_id"`
-	FirstPrompt string    `json:"first_prompt"`
-	LastPrompt  string    `json:"last_prompt"`
-	MessageCount int      `json:"message_count"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
-}
-
 type sessionLine struct {
 	Type        string `json:"type"`
 	SessionID   string `json:"sessionId"`
@@ -82,18 +73,18 @@ func GetClaudeProjectDir(projectPath string) string {
 	return filepath.Join(homeDir, ".claude", "projects", sanitized)
 }
 
-func ListClaudeSessions(projectPath string) ([]ClaudeSession, error) {
+func ListAgentSessions(projectPath string) ([]AgentSession, error) {
 	claudeDir := GetClaudeProjectDir(projectPath)
 
 	entries, err := os.ReadDir(claudeDir)
 	if os.IsNotExist(err) {
-		return []ClaudeSession{}, nil
+		return []AgentSession{}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to read claude directory: %w", err)
 	}
 
-	var sessions []ClaudeSession
+	var sessions []AgentSession
 
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".jsonl") {
@@ -127,14 +118,14 @@ func ListClaudeSessions(projectPath string) ([]ClaudeSession, error) {
 	return sessions, nil
 }
 
-func parseSessionFile(path string, sessionID string) (*ClaudeSession, error) {
+func parseSessionFile(path string, sessionID string) (*AgentSession, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer file.Close()
 
-	session := &ClaudeSession{
+	session := &AgentSession{
 		SessionID: sessionID,
 	}
 

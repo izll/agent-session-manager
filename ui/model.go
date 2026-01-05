@@ -52,10 +52,11 @@ const (
 	stateList
 	stateNewName
 	stateNewPath
-	stateSelectClaudeSession // Selecting Claude session to resume
+	stateSelectAgentSession  // Selecting agent session to resume
 	stateConfirmDelete
 	stateConfirmDeleteProject // Confirm project deletion
 	stateConfirmImport        // Confirm import sessions
+	stateConfirmStart         // Confirm auto-start session
 	stateRename
 	stateRenameProject // Renaming a project
 	stateHelp
@@ -87,7 +88,7 @@ type Model struct {
 	deleteTarget    *session.Instance
 	preview         string
 	err             error
-	claudeSessions  []session.ClaudeSession   // Claude sessions for current instance
+	agentSessions   []session.AgentSession    // Agent sessions for current instance
 	sessionCursor   int                       // Cursor for Claude session selection
 	pendingInstance *session.Instance         // Instance being created
 	lastLines       map[string]string         // Last output line for each instance (by ID)
@@ -321,10 +322,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleNewNameKeys(msg)
 		case stateNewPath:
 			return m.handleNewPathKeys(msg)
-		case stateSelectClaudeSession:
+		case stateSelectAgentSession:
 			return m.handleSelectSessionKeys(msg)
 		case stateConfirmDelete:
 			return m.handleConfirmDeleteKeys(msg)
+		case stateConfirmStart:
+			return m.handleConfirmStartKeys(msg)
 		case stateRename:
 			return m.handleRenameKeys(msg)
 		case stateHelp:

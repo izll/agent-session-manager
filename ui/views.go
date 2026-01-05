@@ -36,11 +36,13 @@ func (m Model) View() string {
 		return m.helpView()
 	case stateConfirmDelete:
 		return m.confirmDeleteView()
+	case stateConfirmStart:
+		return m.confirmStartView()
 	case stateNewName, stateNewPath:
 		return m.newInstanceView()
 	case stateRename:
 		return m.renameView()
-	case stateSelectClaudeSession:
+	case stateSelectAgentSession:
 		return m.selectSessionView()
 	case stateColorPicker:
 		return m.colorPickerView()
@@ -183,6 +185,7 @@ func (m Model) helpView() string {
 		keyStyle.Render("↵") + descStyle.Render(" attach"),
 		keyStyle.Render("n") + descStyle.Render(" new"),
 		keyStyle.Render("s") + descStyle.Render(" start"),
+		keyStyle.Render("a") + descStyle.Render(" auto-start"),
 		keyStyle.Render("x") + descStyle.Render(" stop"),
 		keyStyle.Render("d") + descStyle.Render(" delete"),
 		keyStyle.Render("e") + descStyle.Render(" rename"),
@@ -241,8 +244,10 @@ func (m Model) helpView() string {
 		desc string
 	}{
 		{"↵ Enter", "Start session (if stopped) and attach to tmux session"},
-		{"n New", "Create a new Claude Code session with project path"},
-		{"r Resume", "Continue a previous Claude conversation"},
+		{"n New", "Create a new agent session with project path"},
+		{"s Start", "Start session in background without attaching"},
+		{"a Auto-start", "Start NEW session with confirmation (stops current if running)"},
+		{"r Resume", "Continue a previous session or start new"},
 		{"p Prompt", "Send a message to running session without attaching"},
 		{"c Color", "Customize session with colors and gradients"},
 		{"g Group", "Create a new session group for organization"},
@@ -314,6 +319,24 @@ func (m Model) confirmDeleteView() string {
 	return m.renderOverlayDialog(" Confirm Delete ", boxContent.String(), 40, "#FF5F87")
 }
 
+// confirmStartView renders the auto-start confirmation dialog as an overlay
+func (m Model) confirmStartView() string {
+	var boxContent strings.Builder
+	boxContent.WriteString("\n")
+	if inst := m.getSelectedInstance(); inst != nil {
+		if inst.Status == session.StatusRunning {
+			boxContent.WriteString(fmt.Sprintf("  Start NEW session for '%s'?\n", inst.Name))
+			boxContent.WriteString("  (will stop current and start fresh)\n\n")
+		} else {
+			boxContent.WriteString(fmt.Sprintf("  Start NEW session for '%s'?\n\n", inst.Name))
+		}
+	}
+	boxContent.WriteString(helpStyle.Render("  y: yes  n: no"))
+	boxContent.WriteString("\n")
+
+	return m.renderOverlayDialog(" Start New Session ", boxContent.String(), 50, "#87D7FF")
+}
+
 // newInstanceView renders the new session creation dialog as an overlay
 func (m Model) newInstanceView() string {
 	var boxContent strings.Builder
@@ -371,11 +394,11 @@ func (m Model) selectSessionView() string {
 		startIdx = 0
 	}
 
-	totalItems := len(m.claudeSessions) + 1 // +1 for "new session"
+	totalItems := len(m.agentSessions) + 1 // +1 for "new session"
 
 	// Option 0: Start new session
 	if startIdx == 0 {
-		otherCount := len(m.claudeSessions)
+		otherCount := len(m.agentSessions)
 		suffix := ""
 		if otherCount > 0 {
 			suffix = fmt.Sprintf(" (+%d other sessions)", otherCount)
@@ -391,7 +414,7 @@ func (m Model) selectSessionView() string {
 
 	// List existing sessions
 	visibleCount := 1
-	for i, cs := range m.claudeSessions {
+	for i, cs := range m.agentSessions {
 		itemIdx := i + 1
 
 		if itemIdx < startIdx {
@@ -860,6 +883,10 @@ func (m Model) getLastLine(inst *session.Instance) string {
 	}
 	// Truncate to prevent line wrap
 	cleanLine := strings.TrimSpace(stripANSI(lastLine))
+	// If there's a line break, only show the first line
+	if idx := strings.IndexAny(cleanLine, "\n\r"); idx >= 0 {
+		cleanLine = strings.TrimSpace(cleanLine[:idx])
+	}
 	maxLen := ListPaneWidth - 14 // Account for tree prefix + "└─ "
 	if maxLen < 10 {
 		maxLen = 10

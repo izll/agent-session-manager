@@ -43,11 +43,12 @@ const (
 
 // AgentConfig contains configuration for each agent type
 type AgentConfig struct {
-	Command       string   // Base command to run
-	SupportsResume bool    // Whether agent supports session resume
-	SupportsAutoYes bool   // Whether agent has auto-approve flag
-	AutoYesFlag    string  // The flag for auto-approve (e.g., "--dangerously-skip-permissions")
-	ResumeFlag     string  // The flag for resume (e.g., "--resume")
+	Command            string // Base command to run
+	SupportsResume     bool   // Whether agent supports session resume
+	SupportsAutoYes    bool   // Whether agent has auto-approve flag
+	AutoYesFlag        string // The flag for auto-approve (e.g., "--dangerously-skip-permissions")
+	ResumeFlag         string // The flag for resume (e.g., "--resume")
+	ResumeIsSubcommand bool   // If true, resume is a subcommand (e.g., "codex resume") not a flag
 }
 
 // AgentConfigs maps agent types to their configurations
@@ -61,8 +62,9 @@ var AgentConfigs = map[AgentType]AgentConfig{
 	},
 	AgentGemini: {
 		Command:         "gemini",
-		SupportsResume:  false,
+		SupportsResume:  true,
 		SupportsAutoYes: false,
+		ResumeFlag:      "--resume",
 	},
 	AgentAider: {
 		Command:         "aider",
@@ -71,21 +73,26 @@ var AgentConfigs = map[AgentType]AgentConfig{
 		AutoYesFlag:     "--yes",
 	},
 	AgentCodex: {
-		Command:         "codex",
-		SupportsResume:  false,
-		SupportsAutoYes: true,
-		AutoYesFlag:     "--full-auto",
+		Command:            "codex",
+		SupportsResume:     true,
+		SupportsAutoYes:    true,
+		AutoYesFlag:        "--full-auto",
+		ResumeFlag:         "resume",
+		ResumeIsSubcommand: true,
 	},
 	AgentAmazonQ: {
-		Command:         "q",
-		SupportsResume:  false,
-		SupportsAutoYes: true,
-		AutoYesFlag:     "--trust-all-tools",
+		Command:            "q",
+		SupportsResume:     true,
+		SupportsAutoYes:    true,
+		AutoYesFlag:        "--trust-all-tools",
+		ResumeFlag:         "chat --resume",
+		ResumeIsSubcommand: true,
 	},
 	AgentOpenCode: {
 		Command:         "opencode",
-		SupportsResume:  false,
+		SupportsResume:  true,
 		SupportsAutoYes: false,
+		ResumeFlag:      "--session",
 	},
 	AgentCustom: {
 		Command:         "",
@@ -242,18 +249,46 @@ func (i *Instance) StartWithResume(resumeID string) error {
 			cmdToCheck = config.Command
 			args := []string{}
 
-			// Add auto-yes flag if supported and enabled
-			if i.AutoYes && config.SupportsAutoYes && config.AutoYesFlag != "" {
-				args = append(args, config.AutoYesFlag)
-			}
+			// Handle resume subcommands (codex resume, q chat --resume) vs flags (claude --resume)
+			if config.SupportsResume && config.ResumeIsSubcommand {
+				// Resume is a subcommand - put it first, then flags, then session ID
+				if resumeID != "" || i.ResumeSessionID != "" {
+					// Add resume subcommand
+					args = append(args, config.ResumeFlag)
 
-			// Add resume flag if supported and specified (Claude only)
-			if config.SupportsResume && config.ResumeFlag != "" {
-				if resumeID != "" {
-					args = append(args, config.ResumeFlag, resumeID)
-					i.ResumeSessionID = resumeID
-				} else if i.ResumeSessionID != "" {
-					args = append(args, config.ResumeFlag, i.ResumeSessionID)
+					// Add auto-yes flag after subcommand if supported
+					if i.AutoYes && config.SupportsAutoYes && config.AutoYesFlag != "" {
+						args = append(args, config.AutoYesFlag)
+					}
+
+					// Add session ID
+					if resumeID != "" {
+						args = append(args, resumeID)
+						i.ResumeSessionID = resumeID
+					} else if i.ResumeSessionID != "" {
+						args = append(args, i.ResumeSessionID)
+					}
+				} else {
+					// No resume - just add auto-yes flag if needed
+					if i.AutoYes && config.SupportsAutoYes && config.AutoYesFlag != "" {
+						args = append(args, config.AutoYesFlag)
+					}
+				}
+			} else {
+				// Resume is a flag - add auto-yes first, then resume flag
+				// Add auto-yes flag if supported and enabled
+				if i.AutoYes && config.SupportsAutoYes && config.AutoYesFlag != "" {
+					args = append(args, config.AutoYesFlag)
+				}
+
+				// Add resume flag if supported and specified
+				if config.SupportsResume && config.ResumeFlag != "" {
+					if resumeID != "" {
+						args = append(args, config.ResumeFlag, resumeID)
+						i.ResumeSessionID = resumeID
+					} else if i.ResumeSessionID != "" {
+						args = append(args, config.ResumeFlag, i.ResumeSessionID)
+					}
 				}
 			}
 
@@ -409,7 +444,8 @@ func (i *Instance) GetLastLine() string {
 
 	sessionName := i.TmuxSessionName()
 	// Capture last 50 lines with colors (-e flag preserves ANSI escape sequences)
-	cmd := exec.Command("tmux", "capture-pane", "-t", sessionName, "-p", "-e", "-S", "-50")
+	// -J flag joins wrapped lines (prevents terminal width wrapping issues)
+	cmd := exec.Command("tmux", "capture-pane", "-t", sessionName, "-p", "-e", "-J", "-S", "-50")
 	output, err := cmd.Output()
 	if err != nil {
 		return "..."
@@ -458,6 +494,31 @@ func (i *Instance) SendKeys(keys string) error {
 
 	sessionName := i.TmuxSessionName()
 	cmd := exec.Command("tmux", "send-keys", "-t", sessionName, keys)
+	return cmd.Run()
+}
+
+// SendText sends text literally (not interpreted as key names)
+func (i *Instance) SendText(text string) error {
+	if !i.IsAlive() {
+		return fmt.Errorf("session not running")
+	}
+
+	sessionName := i.TmuxSessionName()
+	// Use -l flag to send text literally without interpreting key names
+	cmd := exec.Command("tmux", "send-keys", "-l", "-t", sessionName, text)
+	return cmd.Run()
+}
+
+// SendPrompt sends a prompt text followed by Enter key in a single command
+func (i *Instance) SendPrompt(text string) error {
+	if !i.IsAlive() {
+		return fmt.Errorf("session not running")
+	}
+
+	sessionName := i.TmuxSessionName()
+	// Send text and Enter in one command - tmux will not interpret text as key names
+	// unless they are exact key name matches, so this is safe for most prompts
+	cmd := exec.Command("tmux", "send-keys", "-t", sessionName, text, "Enter")
 	return cmd.Run()
 }
 

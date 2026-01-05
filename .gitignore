@@ -5,6 +5,9 @@ agent-session-manager
 # Project-specific
 CLAUDE.md
 
+# Demo files (entire directory excluded)
+demos/
+
 # Claude Code local settings
 .claude/
 
