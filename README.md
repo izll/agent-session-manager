@@ -84,7 +84,7 @@ chmod +x install.sh
 Install options:
 ```bash
 ./install.sh              # Install latest version to ~/.local/bin
-./install.sh -v 0.6.0     # Install specific version
+./install.sh -v 0.6.1     # Install specific version
 ./install.sh -d /usr/local/bin  # Install to custom directory
 ./install.sh -u           # Update existing installation
 ```
@@ -94,15 +94,15 @@ Install options:
 **Debian/Ubuntu (.deb):**
 ```bash
 # Download from releases
-wget https://github.com/izll/agent-session-manager/releases/download/v0.6.0/asmgr_0.6.0_linux_amd64.deb
-sudo dpkg -i asmgr_0.6.0_linux_amd64.deb
+wget https://github.com/izll/agent-session-manager/releases/download/v0.6.1/asmgr_0.6.1_linux_amd64.deb
+sudo dpkg -i asmgr_0.6.1_linux_amd64.deb
 ```
 
 **RedHat/Fedora/Rocky (.rpm):**
 ```bash
 # Download from releases
-wget https://github.com/izll/agent-session-manager/releases/download/v0.6.0/asmgr_0.6.0_linux_x86_64.rpm
-sudo rpm -i asmgr_0.6.0_linux_x86_64.rpm
+wget https://github.com/izll/agent-session-manager/releases/download/v0.6.1/asmgr_0.6.1_linux_x86_64.rpm
+sudo rpm -i asmgr_0.6.1_linux_x86_64.rpm
 ```
 
 ### Build from Source
@@ -198,7 +198,8 @@ asmgr
 | `t` | Create new tab (choose Agent or Terminal) |
 | `T` | Rename current tab |
 | `W` | Quick close current tab |
-| `[` / `]` | Switch between tabs |
+| `Alt+←` / `Alt+→` | Switch between tabs |
+| `[` / `]` | Switch between tabs (alternative) |
 | `Ctrl+←` / `Ctrl+→` | Switch between tabs (alternative) |
 | `Ctrl+f` | Toggle tab tracking (follow/unfollow) |
 
@@ -251,8 +252,22 @@ asmgr
 |-----|--------|
 | `Ctrl+q` | Detach from session (quick, works in any tmux session) |
 | `Ctrl+b d` | Detach from session (tmux default) |
+| `Alt+←` / `Alt+→` | Switch between tabs |
 
 > **Note:** `Ctrl+q` is set as a universal quick-detach for all tmux sessions. ASMGR sessions get automatic resize before detach to maintain proper preview dimensions.
+
+### Tmux Status Bar
+
+When attached to a session, ASMGR configures a custom tmux status bar:
+
+```
+ SessionName │ main │ terminal │ claude-2 │     Alt+</>: tabs | Ctrl+Q: detach
+```
+
+- **Session name** - Displayed with your configured colors/gradients
+- **Tabs** - All windows shown with separators (active tab in white bold)
+- **YOLO indicator** - Orange `!` after active tab name when YOLO mode is enabled
+- **Key hints** - Quick reference for tab switching and detach
 
 ## Color Customization
 
@@ -348,7 +363,8 @@ Press `t` to create a new tab. You'll be asked to choose:
 │● main │○ terminal │● claude-2 │
 ```
 
-- Press `[` or `]` to switch between tabs
+- Press `Alt+←` or `Alt+→` to switch between tabs
+- Press `[` or `]` as alternatives
 - Press `Ctrl+←` or `Ctrl+→` as alternatives
 - Press `Ctrl+f` to toggle tracking on the current tab
 
@@ -381,7 +397,7 @@ When you start ASMGR, you'll see the project selector:
 ```
 ┌─────────────────────────────────────┐
 │  Agent Session Manager              │
-│             v0.6.0                  │
+│             v0.6.1                  │
 ├─────────────────────────────────────┤
 │  > Backend API         [5 sessions] │
 │    Frontend App        [3 sessions] │

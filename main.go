@@ -176,17 +176,8 @@ func toggleYolo(tmuxSessionName string) error {
 		args = append(args, config.ResumeFlag, inst.ResumeSessionID)
 	}
 
-	// Update tmux window name and status bar to show yolo status
-	windowName := inst.Name
-	if inst.AutoYes {
-		windowName = " ! " + inst.Name
-		// Orange/yellow status bar for yolo mode
-		exec.Command("tmux", "set-option", "-t", tmuxSessionName, "status-style", "bg=colour208,fg=black").Run()
-	} else {
-		// Reset to default status bar
-		exec.Command("tmux", "set-option", "-t", tmuxSessionName, "status-style", "bg=green,fg=black").Run()
-	}
-	exec.Command("tmux", "rename-window", "-t", tmuxSessionName, windowName).Run()
+	// Update tmux window name (YOLO indicator is shown in status bar separately)
+	exec.Command("tmux", "rename-window", "-t", tmuxSessionName, inst.Name).Run()
 
 	// Kill current process and respawn pane with new command
 	cmdStr := strings.Join(args, " ")

@@ -183,3 +183,65 @@ func getContrastColor(bgColor string) string {
 	}
 	return "#FFFFFF" // Light text for dark background
 }
+
+// applyTmuxGradient generates tmux format string with per-character gradient colors
+func applyTmuxGradient(text, gradientName string, bold bool) string {
+	colors, ok := gradients[gradientName]
+	if !ok || len(text) == 0 {
+		return text
+	}
+
+	runes := []rune(text)
+	var result strings.Builder
+
+	for i, r := range runes {
+		position := float64(i) / float64(len(runes)-1)
+		if len(runes) == 1 {
+			position = 0.5
+		}
+		color := interpolateColor(colors, position)
+		if bold {
+			result.WriteString(fmt.Sprintf("#[fg=%s,bold]%c", color, r))
+		} else {
+			result.WriteString(fmt.Sprintf("#[fg=%s]%c", color, r))
+		}
+	}
+
+	return result.String()
+}
+
+// formatTmuxSessionName formats session name for tmux status bar with appropriate colors
+func formatTmuxSessionName(name, fgColor, bgColor string) string {
+	// Check if foreground is gradient
+	if _, isGradient := gradients[fgColor]; isGradient {
+		// Gradient text + reset color after
+		return applyTmuxGradient(name, fgColor, true) + "#[default]"
+	}
+
+	// Handle "auto" foreground - use contrast color based on background
+	if fgColor == "auto" && bgColor != "" && bgColor != "auto" {
+		bgCol := bgColor
+		if colors, isGrad := gradients[bgColor]; isGrad && len(colors) > 0 {
+			bgCol = colors[0]
+		}
+		textColor := getContrastColor(bgCol)
+		return fmt.Sprintf("#[fg=%s,bg=%s,bold]%s#[default]", textColor, bgCol, name)
+	}
+
+	// If background color is set, use white text on colored background
+	if bgColor != "" && bgColor != "auto" {
+		bgCol := bgColor
+		if colors, isGrad := gradients[bgColor]; isGrad && len(colors) > 0 {
+			bgCol = colors[0]
+		}
+		return fmt.Sprintf("#[fg=#FAFAFA,bg=%s,bold]%s#[default]", bgCol, name)
+	}
+
+	// Plain hex color
+	if fgColor != "" && fgColor != "auto" && len(fgColor) > 0 && fgColor[0] == '#' {
+		return fmt.Sprintf("#[fg=%s,bold]%s#[default]", fgColor, name)
+	}
+
+	// Default: white on purple
+	return fmt.Sprintf("#[fg=#FAFAFA,bg=%s,bold]%s#[default]", ColorPurple, name)
+}

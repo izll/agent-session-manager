@@ -29,7 +29,7 @@ type rpmDownloadDoneMsg struct {
 // Version info
 const (
 	AppName    = "asmgr"
-	AppVersion = "0.6.0"
+	AppVersion = "0.6.1"
 )
 
 // Layout constants

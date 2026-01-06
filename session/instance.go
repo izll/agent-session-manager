@@ -353,15 +353,8 @@ func (i *Instance) StartWithResume(resumeID string) error {
 
 		// Ctrl+q will be set up with resize in UpdateDetachBinding
 
-		// Set yolo mode visual indicators if AutoYes is enabled
-		if i.AutoYes {
-			windowName := " ! " + i.Name
-			exec.Command("tmux", "rename-window", "-t", sessionName, windowName).Run()
-			exec.Command("tmux", "set-option", "-t", sessionName, "status-style", "bg=colour208,fg=black").Run()
-		} else {
-			exec.Command("tmux", "rename-window", "-t", sessionName, i.Name).Run()
-			exec.Command("tmux", "set-option", "-t", sessionName, "status-style", "bg=green,fg=black").Run()
-		}
+		// Set window name (YOLO indicator is shown in status bar separately)
+		exec.Command("tmux", "rename-window", "-t", sessionName, i.Name).Run()
 
 		// Check if session is still alive after a short delay (detect immediate exit)
 		time.Sleep(300 * time.Millisecond)

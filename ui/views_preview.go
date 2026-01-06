@@ -177,6 +177,10 @@ func (m Model) buildPreviewPane(contentHeight int) string {
 		tabs.WriteString(tabBorderStyle.Render("│"))
 		for i, w := range windows {
 			tabName := w.Name
+			// Strip " ! " prefix from old YOLO windows
+			if strings.HasPrefix(tabName, " ! ") {
+				tabName = strings.TrimPrefix(tabName, " ! ")
+			}
 			// Add status indicator
 			tabIndicator := ""
 			if w.Dead {
@@ -203,10 +207,6 @@ func (m Model) buildPreviewPane(contentHeight int) string {
 						tabIndicator = idleStyle.Render("● ")
 					}
 				}
-			}
-			// Truncate long names
-			if len(tabName) > 10 {
-				tabName = tabName[:9] + "…"
 			}
 			if w.Active {
 				tabs.WriteString(" " + tabIndicator + activeTabStyle.Render(tabName) + " ")

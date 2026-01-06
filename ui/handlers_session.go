@@ -3,11 +3,78 @@ package ui
 import (
 	"fmt"
 	"os/exec"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/izll/agent-session-manager/session"
 )
+
+// isGradientColor checks if a color name is a gradient
+func isGradientColor(color string) bool {
+	_, exists := gradients[color]
+	return exists
+}
+
+// configureTmuxStatusBar sets up the tmux status bar to display tabs
+func configureTmuxStatusBar(sessionName, instanceName, fgColor, bgColor string, autoYes bool) {
+	target := sessionName + ":"
+
+	// Enable status bar
+	exec.Command("tmux", "set-option", "-t", target, "status", "on").Run()
+
+	// Status bar style - dark background
+	exec.Command("tmux", "set-option", "-t", target, "status-style", "bg=#1a1a2e,fg=#888888").Run()
+
+	// Check if there are multiple windows
+	windowCountOutput, _ := exec.Command("tmux", "list-windows", "-t", sessionName, "-F", "x").Output()
+	windowCount := len(strings.Split(strings.TrimSpace(string(windowCountOutput)), "\n"))
+
+	// Left side: session name with colors (gradient or solid)
+	formattedName := formatTmuxSessionName(instanceName, fgColor, bgColor)
+	var statusLeft string
+	if windowCount > 1 {
+		// Multiple windows - add separator
+		statusLeft = fmt.Sprintf("#[default,bg=#1a1a2e] %s #[default,nobold]#[fg=#555555,bg=#1a1a2e]│ ", formattedName)
+	} else {
+		// Single window - no separator, but show YOLO if enabled
+		if autoYes {
+			statusLeft = fmt.Sprintf("#[default,bg=#1a1a2e] %s #[fg=#FFA500,bold]YOLO !#[default] ", formattedName)
+		} else {
+			statusLeft = fmt.Sprintf("#[default,bg=#1a1a2e] %s ", formattedName)
+		}
+	}
+	exec.Command("tmux", "set-option", "-t", target, "status-left", statusLeft).Run()
+	// Increase length to accommodate gradient (each char has color codes)
+	exec.Command("tmux", "set-option", "-t", target, "status-left-length", "200").Run()
+
+	// Right side: key hints
+	exec.Command("tmux", "set-option", "-t", target, "status-right", "#[default]#[fg=#555555,bg=#1a1a2e] Alt+</>: tabs | Ctrl+Q: detach ").Run()
+	exec.Command("tmux", "set-option", "-t", target, "status-right-length", "40").Run()
+
+	// Window options for tabs - only show if multiple windows
+	if windowCount > 1 {
+		// Inactive: gray text
+		exec.Command("tmux", "set-option", "-t", sessionName, "window-status-format", "#[fg=#888888]#{?pane_dead,○ ,}#W #[fg=#555555]│ ").Run()
+		// Active: white bold text, with ! if YOLO mode
+		if autoYes {
+			exec.Command("tmux", "set-option", "-t", sessionName, "window-status-current-format", "#[fg=#FAFAFA,bold]#{?pane_dead,○ ,}#W #[fg=#FFA500]!#[fg=#555555,nobold]│ ").Run()
+		} else {
+			exec.Command("tmux", "set-option", "-t", sessionName, "window-status-current-format", "#[fg=#FAFAFA,bold]#{?pane_dead,○ ,}#W #[fg=#555555,nobold]│ ").Run()
+		}
+	} else {
+		// Hide window list when only 1 window
+		exec.Command("tmux", "set-option", "-t", sessionName, "window-status-format", "").Run()
+		exec.Command("tmux", "set-option", "-t", sessionName, "window-status-current-format", "").Run()
+	}
+
+	// No separator
+	exec.Command("tmux", "set-option", "-t", sessionName, "window-status-separator", "").Run()
+
+	// Key bindings for tab switching: Alt+Left/Right (global, -n = no prefix needed)
+	exec.Command("tmux", "bind-key", "-n", "M-Left", "previous-window").Run()
+	exec.Command("tmux", "bind-key", "-n", "M-Right", "next-window").Run()
+}
 
 // handleEnterSession starts (if needed) and attaches to the selected session
 func (m *Model) handleEnterSession() tea.Cmd {
@@ -62,6 +129,13 @@ func (m *Model) handleEnterSession() tea.Cmd {
 	// Set up hook to resize window on focus gain (fixes Konsole tab switch issue)
 	exec.Command("tmux", "set-hook", "-t", sessionName, "client-focus-in", "resize-window -A").Run()
 	exec.Command("tmux", "set-hook", "-t", sessionName, "pane-focus-in", "resize-window -A").Run()
+
+	// Update window name (removes any old " ! " prefix from YOLO mode)
+	exec.Command("tmux", "rename-window", "-t", sessionName, inst.Name).Run()
+
+	// Configure tmux status bar to show tabs
+	configureTmuxStatusBar(sessionName, inst.Name, inst.Color, inst.BgColor, inst.AutoYes)
+
 	// Set up Ctrl+Q to resize to preview size before detach
 	tmuxWidth, tmuxHeight := m.calculateTmuxDimensions()
 	inst.UpdateDetachBinding(tmuxWidth, tmuxHeight)

@@ -109,7 +109,7 @@ func (m Model) helpView() string {
 	b.WriteString("\n")
 	b.WriteString(renderRow("T", "Rename tab", "W", "Quick close tab"))
 	b.WriteString("\n")
-	b.WriteString(renderRow("[ ]", "Switch tabs", "Ctrl+F", "Toggle tracking"))
+	b.WriteString(renderRow("Alt+←/→", "Switch tabs", "Ctrl+F", "Toggle tracking"))
 	b.WriteString("\n")
 	b.WriteString("  " + noteStyle.Render("     ↳ Stopped tabs show ○ indicator, remain visible"))
 	b.WriteString("\n\n")

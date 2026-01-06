@@ -304,7 +304,7 @@ func (m Model) handleListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+down":
 		m.handleMoveSessionDown()
 
-	case "ctrl+left", "[":
+	case "ctrl+left", "alt+left", "[":
 		// Switch to previous tmux window/tab
 		if inst := m.getSelectedInstance(); inst != nil {
 			if inst.Status == session.StatusRunning {
@@ -312,7 +312,7 @@ func (m Model) handleListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-	case "ctrl+right", "]":
+	case "ctrl+right", "alt+right", "]":
 		// Switch to next tmux window/tab
 		if inst := m.getSelectedInstance(); inst != nil {
 			if inst.Status == session.StatusRunning {
@@ -566,20 +566,22 @@ func (m Model) handleListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "T":
-		// Rename current tmux tab/window
+		// Rename current tmux tab/window (only if multiple windows)
 		if inst := m.getSelectedInstance(); inst != nil {
 			if inst.Status == session.StatusRunning {
 				windows := inst.GetWindowList()
-				for _, w := range windows {
-					if w.Active {
-						m.nameInput.SetValue(w.Name)
-						m.nameInput.CursorEnd()
-						m.nameInput.Focus()
-						break
+				if len(windows) > 1 {
+					for _, w := range windows {
+						if w.Active {
+							m.nameInput.SetValue(w.Name)
+							m.nameInput.CursorEnd()
+							m.nameInput.Focus()
+							break
+						}
 					}
+					m.state = stateRenameTab
+					return m, textinput.Blink
 				}
-				m.state = stateRenameTab
-				return m, textinput.Blink
 			}
 		}
 
