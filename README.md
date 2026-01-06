@@ -34,6 +34,8 @@ A powerful terminal UI (TUI) application for managing multiple AI coding assista
 - **Fancy Status Bar** - Styled bottom bar with highlighted keys, toggle indicators, and separators
 - **Scrollable Help View** - Comprehensive help page with keyboard shortcuts, detailed descriptions, and scroll support
 - **Session Groups** - Organize sessions into collapsible groups for better organization
+- **Session Notes** - Add persistent notes/comments to sessions (stays with session, not conversation)
+- **Split View** - Compare two sessions side-by-side with pinned preview
 
 ## Installation
 
@@ -79,7 +81,7 @@ chmod +x install.sh
 Install options:
 ```bash
 ./install.sh              # Install latest version to ~/.local/bin
-./install.sh -v 0.3.7     # Install specific version
+./install.sh -v 0.5.0     # Install specific version
 ./install.sh -d /usr/local/bin  # Install to custom directory
 ./install.sh -u           # Update existing installation
 ```
@@ -89,15 +91,15 @@ Install options:
 **Debian/Ubuntu (.deb):**
 ```bash
 # Download from releases
-wget https://github.com/izll/agent-session-manager/releases/download/v0.3.7/asmgr_0.3.7_linux_amd64.deb
-sudo dpkg -i asmgr_0.3.7_linux_amd64.deb
+wget https://github.com/izll/agent-session-manager/releases/download/v0.5.0/asmgr_0.5.0_linux_amd64.deb
+sudo dpkg -i asmgr_0.5.0_linux_amd64.deb
 ```
 
 **RedHat/Fedora/Rocky (.rpm):**
 ```bash
 # Download from releases
-wget https://github.com/izll/agent-session-manager/releases/download/v0.3.7/asmgr_0.3.7_linux_x86_64.rpm
-sudo rpm -i asmgr_0.3.7_linux_x86_64.rpm
+wget https://github.com/izll/agent-session-manager/releases/download/v0.5.0/asmgr_0.5.0_linux_x86_64.rpm
+sudo rpm -i asmgr_0.5.0_linux_x86_64.rpm
 ```
 
 ### Build from Source
@@ -164,10 +166,14 @@ asmgr
 #### Navigation
 | Key | Action |
 |-----|--------|
-| `j` / `↓` | Move down |
-| `k` / `↑` | Move up |
-| `J` / `Shift+↓` | Move session down (reorder) |
-| `K` / `Shift+↑` | Move session up (reorder) |
+| `j` / `↓` | Move cursor down |
+| `k` / `↑` | Move cursor up |
+| `Ctrl+↓` | Move session down (reorder) |
+| `Ctrl+↑` | Move session up (reorder) |
+| `J` / `Shift+↓` / `PgDn` | Scroll preview down |
+| `K` / `Shift+↑` / `PgUp` | Scroll preview up |
+| `Home` | Scroll preview to top |
+| `End` | Scroll preview to bottom |
 
 #### Session Actions
 | Key | Action |
@@ -180,6 +186,7 @@ asmgr
 | `e` | Rename session |
 | `r` | Resume previous conversation or start new (supports Claude, Gemini, Codex, OpenCode, Amazon Q) |
 | `p` | Send prompt/message to running session |
+| `N` | Add/edit session notes |
 | `d` | Delete session |
 
 #### Groups
@@ -199,7 +206,14 @@ asmgr
 | `c` | Change session color |
 | `l` | Toggle compact mode |
 | `t` | Toggle status lines (last output under sessions) |
-| `y` | Toggle auto-yes mode (`--dangerously-skip-permissions`) |
+| `Ctrl+y` | Toggle auto-yes/yolo mode (restarts session if running) |
+
+#### Split View
+| Key | Action |
+|-----|--------|
+| `v` | Toggle split view |
+| `m` | Mark/pin session for top pane |
+| `Tab` | Switch focus between split panes |
 
 #### Projects
 | Key | Action |
@@ -224,7 +238,7 @@ asmgr
 | `Ctrl+q` | Detach from session (quick, works in any tmux session) |
 | `Ctrl+b d` | Detach from session (tmux default) |
 
-> **Note:** `Ctrl+q` is set as a universal quick-detach for all tmux sessions. ASM sessions get automatic resize before detach to maintain proper preview dimensions.
+> **Note:** `Ctrl+q` is set as a universal quick-detach for all tmux sessions. ASMGR sessions get automatic resize before detach to maintain proper preview dimensions.
 
 ## Color Customization
 
@@ -240,11 +254,13 @@ Use `Tab` to switch between foreground and background color selection.
 
 ## Session Resume
 
-ASM can resume previous Claude Code conversations:
+Resume previous conversations for supported agents (Claude, Gemini, Codex, OpenCode, Amazon Q):
 
 1. Press `r` on any session
 2. Browse through previous conversations (shows last message and timestamp)
 3. Select a conversation to resume or start fresh
+
+Note: Aider and custom commands don't support session resume.
 
 ## Starting Sessions
 
@@ -278,6 +294,33 @@ Organize your sessions into collapsible groups:
 
 Sessions without a group appear at the bottom of the list.
 
+## Session Notes
+
+Add persistent notes to any session that stay with the session even when you change the resume conversation:
+
+- Press `N` (Shift+N) on any session to open the notes editor
+- Write multi-line notes (Enter for new lines)
+- `Ctrl+S` to save, `Esc` to cancel, `Ctrl+D` to clear
+- Notes are shown in the preview pane below the session info
+- Notes persist across session restarts and conversation changes
+
+Use notes to track:
+- Current task/goal for each session
+- Important context or decisions
+- TODOs and reminders
+- Handoff notes when switching between sessions
+
+## Split View
+
+Compare two sessions side-by-side:
+
+- Press `v` to toggle split view
+- Press `m` to mark/pin the current session (shown in top pane)
+- Press `Tab` to switch focus between panes
+- Navigate with arrow keys to change the selected session (bottom pane)
+
+The pinned session stays visible while you browse other sessions, useful for comparing outputs or referencing one session while working in another.
+
 ## Projects
 
 Projects allow you to organize your sessions into separate workspaces. Each project has its own isolated session list and groups.
@@ -289,7 +332,7 @@ When you start ASMGR, you'll see the project selector:
 ```
 ┌─────────────────────────────────────┐
 │  Agent Session Manager              │
-│             v0.3.0                  │
+│             v0.5.0                  │
 ├─────────────────────────────────────┤
 │  > Backend API         [5 sessions] │
 │    Frontend App        [3 sessions] │
@@ -317,7 +360,8 @@ Press `i` in the project selector to import sessions from the default (no projec
 Sessions show different status indicators:
 
 - `●` Orange - Active (agent is working)
-- `●` Gray - Idle (waiting for input)
+- `●` Blue - Waiting (waiting for user permission/input)
+- `●` Gray - Idle (ready for new prompt)
 - `○` Red outline - Stopped
 
 ## Configuration
@@ -340,7 +384,7 @@ Stores the list of projects with their names and creation dates.
 
 ### sessions.json
 Stores sessions and groups:
-- Session: name, path, color settings, resume ID, auto-yes, group, agent type
+- Session: name, path, color settings, resume ID, auto-yes, group, agent type, notes
 - Group: name, collapsed state, color settings
 
 ### filters.json (optional)
@@ -366,19 +410,45 @@ Customize status line filtering for each agent. Default filters are built-in, bu
 
 ```
 agent-session-manager/
-├── main.go              # Entry point
-├── session/             # Session management & tmux integration
-│   ├── instance.go      # Instance lifecycle & PTY handling
-│   ├── storage.go       # Persistence & project management
-│   ├── project.go       # Project data structures
-│   └── claude_sessions.go  # Claude session discovery
-└── ui/                  # Bubbletea TUI
-    ├── model.go         # Core model, constants, Init, Update
-    ├── handlers.go      # Keyboard input handlers
-    ├── views.go         # View rendering functions
-    ├── colors.go        # Color definitions & gradients
-    ├── styles.go        # Lipgloss style definitions
-    └── helpers.go       # ANSI utilities & overlay dialog rendering
+├── main.go                  # Entry point
+├── session/                 # Session management & tmux integration
+│   ├── instance.go          # Instance lifecycle & PTY handling
+│   ├── storage.go           # Persistence & project management
+│   ├── project.go           # Project data structures
+│   ├── status_detector.go   # Activity detection (idle/busy/waiting)
+│   ├── suggestion.go        # Prompt suggestions from agents
+│   ├── agent_session.go     # Agent session interface
+│   ├── claude_sessions.go   # Claude session discovery
+│   ├── gemini_sessions.go   # Gemini session discovery
+│   ├── codex_sessions.go    # Codex session discovery
+│   ├── opencode_sessions.go # OpenCode session discovery
+│   ├── amazonq_sessions.go  # Amazon Q session discovery
+│   └── filters/             # Status line filters per agent
+│       ├── config.go        # Filter configuration & loading
+│       ├── claude.go        # Claude-specific filters
+│       ├── gemini.go        # Gemini-specific filters
+│       └── ...              # Other agent filters
+├── ui/                      # Bubbletea TUI
+│   ├── model.go             # Core model, constants, Init, Update
+│   ├── views.go             # Main View() dispatcher
+│   ├── views_session_list.go # Session list rendering
+│   ├── views_preview.go     # Preview pane & split view
+│   ├── views_dialogs.go     # Overlay dialogs (confirm, rename, notes, etc.)
+│   ├── views_project.go     # Project selector views
+│   ├── views_status.go      # Status bar & session selector
+│   ├── views_help.go        # Help screen
+│   ├── views_color_picker.go # Color picker view
+│   ├── handlers.go          # Handler dispatcher
+│   ├── handlers_list.go     # Main list keyboard handlers
+│   ├── handlers_dialogs.go  # Dialog keyboard handlers
+│   ├── handlers_session.go  # Session action handlers
+│   ├── handlers_project.go  # Project management handlers
+│   ├── handlers_group.go    # Group management handlers
+│   ├── colors.go            # Color definitions & gradients
+│   ├── styles.go            # Lipgloss style definitions
+│   └── helpers.go           # ANSI utilities & overlay rendering
+└── updater/                 # Self-update functionality
+    └── updater.go           # Update checker & installer
 ```
 
 ## Dependencies

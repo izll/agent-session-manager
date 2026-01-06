@@ -1,11 +1,13 @@
 package ui
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/izll/agent-session-manager/session"
 	"github.com/mattn/go-runewidth"
 )
 
@@ -167,6 +169,77 @@ var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 // stripANSI removes ANSI escape codes from a string
 func stripANSI(s string) string {
 	return ansiRegex.ReplaceAllString(s, "")
+}
+
+// sessionStatusCounts holds the count of sessions in each status
+type sessionStatusCounts struct {
+	active  int
+	waiting int
+	idle    int
+	stopped int
+}
+
+// countSessionStatuses counts sessions by their activity state
+func (m *Model) countSessionStatuses() sessionStatusCounts {
+	var counts sessionStatusCounts
+	for _, inst := range m.instances {
+		switch inst.Status {
+		case session.StatusRunning:
+			switch m.activityState[inst.ID] {
+			case session.ActivityBusy:
+				counts.active++
+			case session.ActivityWaiting:
+				counts.waiting++
+			default:
+				counts.idle++
+			}
+		case session.StatusStopped:
+			counts.stopped++
+		}
+	}
+	return counts
+}
+
+// buildSessionListHeader builds the header with title and status counts
+func (m *Model) buildSessionListHeader(listWidth int) string {
+	var sb strings.Builder
+
+	counts := m.countSessionStatuses()
+	header := titleStyle.Render(" Sessions ")
+	if len(m.instances) > 0 {
+		countsStr := fmt.Sprintf(" %s %d %s %d %s %d %s %d",
+			activeStyle.Render("●"), counts.active,
+			waitingStyle.Render("●"), counts.waiting,
+			idleStyle.Render("●"), counts.idle,
+			stoppedStyle.Render("○"), counts.stopped)
+		header += dimStyle.Render(countsStr)
+	}
+	sb.WriteString(header)
+	sb.WriteString("\n")
+	sb.WriteString(dimStyle.Render(strings.Repeat("─", listWidth)))
+	sb.WriteString("\n")
+
+	return sb.String()
+}
+
+// buildProjectNameRow builds the project name display row
+func (m *Model) buildProjectNameRow(listWidth int) string {
+	if m.activeProject == nil {
+		return ""
+	}
+
+	var sb strings.Builder
+	projectName := m.activeProject.Name
+	maxLen := listWidth - 12
+	if len(projectName) > maxLen {
+		projectName = projectName[:maxLen-1] + "…"
+	}
+	sb.WriteString(projectLabelStyle.Render(" Project: ") + projectNameStyle.Render(projectName))
+	sb.WriteString("\n")
+	sb.WriteString(dimStyle.Render(strings.Repeat("─", listWidth)))
+	sb.WriteString("\n")
+
+	return sb.String()
 }
 
 // truncateWithANSI truncates a string to maxLen visible characters while preserving ANSI codes

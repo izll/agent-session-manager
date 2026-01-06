@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/cursor"
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/izll/agent-session-manager/session"
@@ -28,7 +29,7 @@ type rpmDownloadDoneMsg struct {
 // Version info
 const (
 	AppName    = "asmgr"
-	AppVersion = "0.4.3"
+	AppVersion = "0.5.0"
 )
 
 // Layout constants
@@ -85,6 +86,7 @@ const (
 	stateDownloadingDeb // Downloading .deb package for dpkg install
 	stateDownloadingRpm // Downloading .rpm package for rpm install
 	stateUpdateSuccess  // Showing successful update message
+	stateNotes          // Editing session notes
 )
 
 // Model represents the main TUI application state for Claude Session Manager.
@@ -145,6 +147,7 @@ type Model struct {
 	deleteProjectTarget *session.Project      // Project being deleted
 	importTarget        *session.Project      // Project to import sessions into
 	previousState       state                 // Previous state to return to from error dialog
+	notesInput          textarea.Model        // Textarea for editing session notes
 }
 
 // visibleItem represents an item in the flattened list view (group header or session)
@@ -198,6 +201,14 @@ func NewModel() (Model, error) {
 	projectInput.Placeholder = "Project name"
 	projectInput.CharLimit = 50
 
+	notesInput := textarea.New()
+	notesInput.Placeholder = "Add notes about this session..."
+	notesInput.CharLimit = 5000
+	notesInput.ShowLineNumbers = false
+	notesInput.Prompt = ""
+	notesInput.SetWidth(70)
+	notesInput.SetHeight(9)
+
 	// Load projects
 	projectsData, err := storage.LoadProjects()
 	if err != nil {
@@ -214,6 +225,7 @@ func NewModel() (Model, error) {
 		groupInput:      groupInput,
 		customCmdInput:  customCmdInput,
 		projectInput:    projectInput,
+		notesInput:      notesInput,
 		projects:        projectsData.Projects,
 		projectCursor:   0, // Default to first project or "Continue without project"
 		groups:          []*session.Group{}, // Empty until project selected
@@ -459,6 +471,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleConfirmUpdateKeys(msg)
 		case stateUpdateSuccess:
 			return m.handleUpdateSuccessKeys(msg)
+		case stateNotes:
+			return m.handleNotesKeys(msg)
 		}
 	}
 
@@ -484,6 +498,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if m.state == stateNewProject || m.state == stateRenameProject {
 		m.projectInput, cmd = m.projectInput.Update(msg)
+		cmds = append(cmds, cmd)
+	}
+	if m.state == stateNotes {
+		m.notesInput, cmd = m.notesInput.Update(msg)
 		cmds = append(cmds, cmd)
 	}
 

@@ -117,7 +117,7 @@ type Instance struct {
 	GroupID         string    `json:"group_id,omitempty"`          // Session group ID
 	Agent           AgentType `json:"agent,omitempty"`             // Agent type (claude, gemini, aider, custom)
 	CustomCommand   string    `json:"custom_command,omitempty"`    // Custom command for AgentCustom
-
+	Notes           string    `json:"notes,omitempty"`             // User notes/comments for this session
 }
 
 // GetAgentConfig returns the agent configuration for this instance
