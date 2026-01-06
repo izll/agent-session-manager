@@ -29,7 +29,7 @@ type rpmDownloadDoneMsg struct {
 // Version info
 const (
 	AppName    = "asmgr"
-	AppVersion = "0.5.4"
+	AppVersion = "0.6.0"
 )
 
 // Layout constants
@@ -65,6 +65,7 @@ const (
 	stateNewPath
 	stateSelectAgentSession  // Selecting agent session to resume
 	stateConfirmDelete
+	stateConfirmStop          // Confirm session stop
 	stateConfirmDeleteProject // Confirm project deletion
 	stateConfirmImport        // Confirm import sessions
 	stateSelectStartMode      // Select replace or parallel session start
@@ -87,6 +88,14 @@ const (
 	stateDownloadingRpm // Downloading .rpm package for rpm install
 	stateUpdateSuccess  // Showing successful update message
 	stateNotes          // Editing session notes
+	stateNewTabChoice   // Choosing between Agent or Terminal tab
+	stateNewTabAgent    // Selecting agent type for new tab
+	stateNewTab         // Creating new tmux tab/window with name
+	stateRenameTab      // Renaming tmux tab/window
+	stateDeleteChoice     // Choosing between deleting session or tab
+	stateConfirmDeleteTab // Confirming tab deletion
+	stateStopChoice       // Choosing between stopping session or tab
+	stateConfirmStopTab   // Confirming tab stop
 )
 
 // Model represents the main TUI application state for Claude Session Manager.
@@ -105,6 +114,7 @@ type Model struct {
 	promptSuggestion string                    // Autocomplete suggestion from agent
 	autoYes         bool
 	deleteTarget    *session.Instance
+	stopTarget      *session.Instance
 	preview         string
 	err             error
 	successMsg      string                        // Success message to display
@@ -114,9 +124,10 @@ type Model struct {
 	isParallelSession   bool                      // True if creating parallel session (don't show resume)
 	parallelOriginalID  string                    // Original instance ID when creating parallel session
 	lastLines           map[string]string                   // Last output line for each instance (by ID)
-	prevContent     map[string]string                   // Previous content hash to detect activity
-	isActive        map[string]bool                     // Whether instance has recent activity
-	activityState   map[string]session.SessionActivity  // Activity state (idle/busy/waiting)
+	prevContent        map[string]string                            // Previous content hash to detect activity
+	isActive           map[string]bool                              // Whether instance has recent activity
+	activityState      map[string]session.SessionActivity           // Activity state (idle/busy/waiting)
+	windowActivityState map[string]map[int]session.SessionActivity  // Window-level activity (session ID -> window index -> activity)
 	colorCursor     int                       // Cursor for color picker
 	colorMode       int                       // 0 = foreground, 1 = background
 	previewFg       string                    // Preview foreground color
@@ -149,6 +160,9 @@ type Model struct {
 	importTarget        *session.Project      // Project to import sessions into
 	previousState       state                 // Previous state to return to from error dialog
 	notesInput          textarea.Model        // Textarea for editing session notes
+	newTabIsAgent       bool                  // Whether new tab should run agent (true) or shell (false)
+	newTabAgent         session.AgentType     // Agent type for new tab
+	newTabAgentCursor   int                   // Cursor for agent selection in new tab dialog
 }
 
 // visibleItem represents an item in the flattened list view (group header or session)
@@ -230,10 +244,11 @@ func NewModel() (Model, error) {
 		projects:        projectsData.Projects,
 		projectCursor:   0, // Default to first project or "Continue without project"
 		groups:          []*session.Group{}, // Empty until project selected
-		lastLines:       make(map[string]string),
-		prevContent:     make(map[string]string),
-		isActive:        make(map[string]bool),
-		activityState:   make(map[string]session.SessionActivity),
+		lastLines:           make(map[string]string),
+		prevContent:         make(map[string]string),
+		isActive:            make(map[string]bool),
+		activityState:       make(map[string]session.SessionActivity),
+		windowActivityState: make(map[string]map[int]session.SessionActivity),
 	}
 
 	// Sessions will be loaded when user selects a project via switchToProject
@@ -460,6 +475,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleSelectSessionKeys(msg)
 		case stateConfirmDelete:
 			return m.handleConfirmDeleteKeys(msg)
+		case stateConfirmStop:
+			return m.handleConfirmStopKeys(msg)
 		case stateSelectStartMode:
 			return m.handleSelectStartModeKeys(msg)
 		case stateConfirmStart:
@@ -490,10 +507,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleUpdateSuccessKeys(msg)
 		case stateNotes:
 			return m.handleNotesKeys(msg)
+		case stateNewTabChoice:
+			return m.handleNewTabChoiceKeys(msg)
+		case stateNewTabAgent:
+			return m.handleNewTabAgentKeys(msg)
+		case stateNewTab:
+			return m.handleNewTabKeys(msg)
+		case stateRenameTab:
+			return m.handleRenameTabKeys(msg)
+		case stateDeleteChoice:
+			return m.handleDeleteChoiceKeys(msg)
+		case stateConfirmDeleteTab:
+			return m.handleConfirmDeleteTabKeys(msg)
+		case stateStopChoice:
+			return m.handleStopChoiceKeys(msg)
+		case stateConfirmStopTab:
+			return m.handleConfirmStopTabKeys(msg)
 		}
 	}
 
-	if m.state == stateNewName || m.state == stateRename {
+	if m.state == stateNewName || m.state == stateRename || m.state == stateNewTab || m.state == stateRenameTab {
 		m.nameInput, cmd = m.nameInput.Update(msg)
 		cmds = append(cmds, cmd)
 	}
@@ -559,11 +592,23 @@ func (m Model) handleTick() (tea.Model, tea.Cmd) {
 			}
 			m.prevContent[inst.ID] = currentLine
 
-			// Detect detailed activity state (busy/waiting/idle)
-			m.activityState[inst.ID] = inst.DetectActivity()
+			// Detect detailed activity state (busy/waiting/idle) across all followed windows
+			m.activityState[inst.ID] = inst.DetectAggregatedActivity()
+
+			// Detect per-window activity for status line coloring
+			if m.windowActivityState[inst.ID] == nil {
+				m.windowActivityState[inst.ID] = make(map[int]session.SessionActivity)
+			}
+			// Main window (0)
+			m.windowActivityState[inst.ID][0] = inst.DetectActivityForWindow(0)
+			// Followed windows
+			for _, fw := range inst.FollowedWindows {
+				m.windowActivityState[inst.ID][fw.Index] = inst.DetectActivityForWindow(fw.Index)
+			}
 		} else {
 			m.isActive[inst.ID] = false
 			m.activityState[inst.ID] = session.ActivityIdle
+			m.windowActivityState[inst.ID] = nil
 		}
 	}
 
@@ -805,6 +850,7 @@ func (m *Model) switchToProject(project *session.Project) error {
 	m.prevContent = make(map[string]string)
 	m.isActive = make(map[string]bool)
 	m.activityState = make(map[string]session.SessionActivity)
+	m.windowActivityState = make(map[string]map[int]session.SessionActivity)
 
 	// Initialize status and last lines for all instances
 	for _, inst := range m.instances {

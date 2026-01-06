@@ -1,6 +1,7 @@
 package session
 
 import (
+	"fmt"
 	"os/exec"
 	"strings"
 )
@@ -14,61 +15,211 @@ const (
 	ActivityWaiting                        // Agent needs user input/permission
 )
 
-// Busy patterns (case sensitive)
-var busyPatterns = []string{
-	"esc to interrupt",
-	"tokens",
-	"Generating",
+// AgentPatterns holds detection patterns for a specific agent
+type AgentPatterns struct {
+	WaitingPatterns []string // Patterns that indicate waiting for user input
+	BusyPatterns    []string // Patterns that indicate agent is working
+	Spinners        []string // Spinner characters
 }
 
-// Waiting patterns (case insensitive) - common for all agents
-var waitingPatterns = []string{
-	"allow once",
-	"allow always",
-	"yes, allow",
-	"no, and tell",
-	"esc to cancel",
-	"do you want to proceed",
-	"waiting for user",
-	"waiting for tool",
-	"apply this change",
+// Default spinner characters (braille dots)
+var defaultSpinners = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+// Agent-specific patterns
+var agentPatterns = map[AgentType]AgentPatterns{
+	AgentClaude: {
+		WaitingPatterns: []string{
+			"allow once",
+			"allow always",
+			"yes, allow",
+			"no, and tell",
+			"esc to cancel",
+			"do you want to proceed",
+			"waiting for user",
+			"waiting for tool",
+			"apply this change",
+			"? for shortcuts",
+		},
+		BusyPatterns: []string{
+			"esc to interrupt",
+			"tokens",
+			"Generating",
+		},
+		Spinners: defaultSpinners,
+	},
+	AgentGemini: {
+		WaitingPatterns: []string{
+			"allow once",
+			"allow always",
+			"waiting for user",
+			"do you want to proceed",
+		},
+		BusyPatterns: []string{
+			"Generating",
+			"esc to cancel",
+		},
+		Spinners: append(defaultSpinners, "∴", "∵", "⋮", "⋯"),
+	},
+	AgentAider: {
+		WaitingPatterns: []string{
+			"allow once",
+			"allow always",
+			"do you want to proceed",
+			"waiting for user",
+		},
+		BusyPatterns: []string{
+			"Generating",
+			"tokens",
+		},
+		Spinners: defaultSpinners,
+	},
+	AgentCodex: {
+		WaitingPatterns: []string{
+			"allow once",
+			"allow always",
+			"do you want to proceed",
+			"waiting for user",
+		},
+		BusyPatterns: []string{
+			"Generating",
+		},
+		Spinners: defaultSpinners,
+	},
+	AgentAmazonQ: {
+		WaitingPatterns: []string{
+			"allow once",
+			"allow always",
+			"do you want to proceed",
+			"waiting for user",
+		},
+		BusyPatterns: []string{
+			"Generating",
+		},
+		Spinners: defaultSpinners,
+	},
+	AgentOpenCode: {
+		WaitingPatterns: []string{
+			"allow once",
+			"allow always",
+			"do you want to proceed",
+			"waiting for user",
+		},
+		BusyPatterns: []string{
+			"Generating",
+		},
+		Spinners: defaultSpinners,
+	},
+	AgentCustom: {
+		WaitingPatterns: []string{
+			"allow once",
+			"allow always",
+			"do you want to proceed",
+			"waiting for user",
+		},
+		BusyPatterns: []string{
+			"Generating",
+		},
+		Spinners: defaultSpinners,
+	},
 }
 
-// Claude-specific waiting patterns
-var claudeWaitingPatterns = []string{
-	"? for shortcuts",
+// getAgentPatterns returns patterns for the given agent type
+func getAgentPatterns(agent AgentType) AgentPatterns {
+	if patterns, ok := agentPatterns[agent]; ok {
+		return patterns
+	}
+	// Default to Claude patterns
+	return agentPatterns[AgentClaude]
 }
-
-// Spinner characters (braille dots)
-var spinners = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-
 
 // DetectActivity analyzes tmux pane content to determine session activity
+// This always checks window 0 (the main agent window)
 func (i *Instance) DetectActivity() SessionActivity {
+	return i.DetectActivityForWindow(0)
+}
+
+// DetectActivityForWindow analyzes a specific tmux window to determine activity
+func (i *Instance) DetectActivityForWindow(windowIdx int) SessionActivity {
 	if !i.IsAlive() {
 		return ActivityIdle
 	}
 
 	sessionName := i.TmuxSessionName()
-	cmd := exec.Command("tmux", "capture-pane", "-t", sessionName, "-p", "-S", "-50")
+	target := fmt.Sprintf("%s:%d", sessionName, windowIdx)
+
+	// Determine agent type for this window
+	agent := i.Agent
+	if agent == "" {
+		agent = AgentClaude
+	}
+	if windowIdx > 0 {
+		for _, fw := range i.FollowedWindows {
+			if fw.Index == windowIdx {
+				agent = fw.Agent
+				break
+			}
+		}
+	}
+
+	cmd := exec.Command("tmux", "capture-pane", "-t", target, "-p", "-S", "-50")
 	output, err := cmd.Output()
 	if err != nil {
 		return ActivityIdle
 	}
 
 	lines := strings.Split(string(output), "\n")
+	patterns := getAgentPatterns(agent)
 
-	// For Claude: use the area between horizontal separator lines
-	if i.Agent == AgentClaude || i.Agent == "" {
-		return detectClaudeActivity(lines)
+	// Claude uses special UI structure detection
+	if agent == AgentClaude {
+		return detectClaudeActivity(lines, patterns)
 	}
 
-	// For other agents: simple pattern check on last lines
-	return detectGenericActivity(lines)
+	// Gemini needs spinner-first detection
+	if agent == AgentGemini {
+		return detectGeminiActivity(lines, patterns)
+	}
+
+	// Other agents use generic detection
+	return detectGenericActivity(lines, patterns)
+}
+
+// DetectAggregatedActivity checks all followed windows and returns highest priority activity
+// Priority: Waiting > Busy > Idle
+func (i *Instance) DetectAggregatedActivity() SessionActivity {
+	if !i.IsAlive() {
+		return ActivityIdle
+	}
+
+	// Always check window 0
+	windowsToCheck := []int{0}
+
+	// Add followed windows
+	for _, fw := range i.FollowedWindows {
+		if fw.Index != 0 { // 0 is already added
+			windowsToCheck = append(windowsToCheck, fw.Index)
+		}
+	}
+
+	highestActivity := ActivityIdle
+
+	for _, winIdx := range windowsToCheck {
+		activity := i.DetectActivityForWindow(winIdx)
+		// Waiting has highest priority
+		if activity == ActivityWaiting {
+			return ActivityWaiting
+		}
+		// Busy is higher than Idle
+		if activity == ActivityBusy && highestActivity == ActivityIdle {
+			highestActivity = ActivityBusy
+		}
+	}
+
+	return highestActivity
 }
 
 // detectClaudeActivity uses Claude Code's UI structure (horizontal separators)
-func detectClaudeActivity(lines []string) SessionActivity {
+func detectClaudeActivity(lines []string, patterns AgentPatterns) SessionActivity {
 	// Find separator line positions
 	var separatorIndices []int
 	for idx, line := range lines {
@@ -134,32 +285,25 @@ func detectClaudeActivity(lines []string) SessionActivity {
 	// Combine lines to check - input area has priority, then above separator
 	allLinesToCheck := append(inputAreaLines, aboveSeparatorLines...)
 
-	// Check for patterns
 	// First pass: check for waiting patterns (higher priority)
 	for _, line := range allLinesToCheck {
 		lineLower := strings.ToLower(line)
-		// Common waiting patterns
-		for _, pattern := range waitingPatterns {
-			if strings.Contains(lineLower, pattern) {
-				return ActivityWaiting
-			}
-		}
-		// Claude-specific waiting patterns
-		for _, pattern := range claudeWaitingPatterns {
+		for _, pattern := range patterns.WaitingPatterns {
 			if strings.Contains(lineLower, pattern) {
 				return ActivityWaiting
 			}
 		}
 	}
 
-	// Second pass: check for busy patterns
+	// Second pass: check for busy patterns (case-insensitive)
 	for _, line := range allLinesToCheck {
-		for _, pattern := range busyPatterns {
-			if strings.Contains(line, pattern) {
+		lineLower := strings.ToLower(line)
+		for _, pattern := range patterns.BusyPatterns {
+			if strings.Contains(lineLower, strings.ToLower(pattern)) {
 				return ActivityBusy
 			}
 		}
-		for _, s := range spinners {
+		for _, s := range patterns.Spinners {
 			if strings.Contains(line, s) {
 				return ActivityBusy
 			}
@@ -169,34 +313,92 @@ func detectClaudeActivity(lines []string) SessionActivity {
 	return ActivityIdle
 }
 
+// detectGeminiActivity checks for Gemini's spinner when working
+func detectGeminiActivity(lines []string, patterns AgentPatterns) SessionActivity {
+	hasSpinner := false
+	hasWaitingPattern := false
+
+	// Count non-empty lines, not indices
+	nonEmptyCount := 0
+	for j := len(lines) - 1; j >= 0 && nonEmptyCount < 15; j-- {
+		line := stripANSIForDetect(lines[j])
+		if line == "" {
+			continue
+		}
+		nonEmptyCount++
+		lineLower := strings.ToLower(line)
+
+		// Check for waiting patterns
+		for _, pattern := range patterns.WaitingPatterns {
+			if strings.Contains(lineLower, pattern) {
+				hasWaitingPattern = true
+				break
+			}
+		}
+
+		// Check for spinner characters
+		for _, s := range patterns.Spinners {
+			if strings.Contains(line, s) {
+				hasSpinner = true
+				break
+			}
+		}
+
+		// Check for busy patterns (case-insensitive)
+		for _, pattern := range patterns.BusyPatterns {
+			if strings.Contains(lineLower, strings.ToLower(pattern)) {
+				hasSpinner = true // treat busy patterns like spinners
+				break
+			}
+		}
+	}
+
+	// Waiting pattern takes priority (even if spinner is present)
+	if hasWaitingPattern {
+		return ActivityWaiting
+	}
+
+	// Spinner without waiting pattern = busy
+	if hasSpinner {
+		return ActivityBusy
+	}
+
+	return ActivityIdle
+}
+
 // detectGenericActivity checks last lines for other agents
-func detectGenericActivity(lines []string) SessionActivity {
+func detectGenericActivity(lines []string, patterns AgentPatterns) SessionActivity {
 	// First pass: check for waiting patterns (higher priority)
-	for j := len(lines) - 1; j >= 0 && j >= len(lines)-15; j-- {
+	nonEmptyCount := 0
+	for j := len(lines) - 1; j >= 0 && nonEmptyCount < 15; j-- {
 		line := strings.TrimSpace(stripANSIForDetect(lines[j]))
 		if line == "" {
 			continue
 		}
+		nonEmptyCount++
 		lineLower := strings.ToLower(line)
-		for _, pattern := range waitingPatterns {
+		for _, pattern := range patterns.WaitingPatterns {
 			if strings.Contains(lineLower, pattern) {
 				return ActivityWaiting
 			}
 		}
 	}
 
-	// Second pass: check for busy patterns
-	for j := len(lines) - 1; j >= 0 && j >= len(lines)-15; j-- {
+	// Second pass: check for busy patterns (case-insensitive)
+	nonEmptyCount = 0
+	for j := len(lines) - 1; j >= 0 && nonEmptyCount < 15; j-- {
 		line := strings.TrimSpace(stripANSIForDetect(lines[j]))
 		if line == "" {
 			continue
 		}
-		for _, pattern := range busyPatterns {
-			if strings.Contains(line, pattern) {
+		nonEmptyCount++
+		lineLower := strings.ToLower(line)
+		for _, pattern := range patterns.BusyPatterns {
+			if strings.Contains(lineLower, strings.ToLower(pattern)) {
 				return ActivityBusy
 			}
 		}
-		for _, s := range spinners {
+		for _, s := range patterns.Spinners {
 			if strings.Contains(line, s) {
 				return ActivityBusy
 			}

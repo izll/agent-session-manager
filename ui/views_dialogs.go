@@ -21,6 +21,19 @@ func (m Model) confirmDeleteView() string {
 	return m.renderOverlayDialog(" Confirm Delete ", boxContent.String(), 40, "#FF5F87")
 }
 
+// confirmStopView renders the stop confirmation dialog as an overlay
+func (m Model) confirmStopView() string {
+	var boxContent strings.Builder
+	boxContent.WriteString("\n\n")
+	if m.stopTarget != nil {
+		boxContent.WriteString(fmt.Sprintf("  Stop session '%s'?\n\n", m.stopTarget.Name))
+	}
+	boxContent.WriteString(helpStyle.Render("  y: yes  n: no"))
+	boxContent.WriteString("\n")
+
+	return m.renderOverlayDialog(" Confirm Stop ", boxContent.String(), 40, "#FFA500")
+}
+
 // confirmStartView renders the auto-start confirmation dialog as an overlay
 func (m Model) confirmStartView() string {
 	var boxContent strings.Builder
@@ -454,4 +467,190 @@ func (m *Model) notesView() string {
 	boxContent.WriteString("\n")
 
 	return m.renderOverlayDialog(" Session Notes ", boxContent.String(), boxWidth, "#7D56F4")
+}
+
+// newTabChoiceView renders the Agent/Terminal choice dialog
+func (m Model) newTabChoiceView() string {
+	keyStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#1a1a2e")).
+		Background(lipgloss.Color(ColorPurple)).
+		Bold(true).
+		Padding(0, 1)
+
+	var boxContent strings.Builder
+	boxContent.WriteString("\n\n")
+	boxContent.WriteString("  What type of tab?\n\n")
+	boxContent.WriteString("  " + keyStyle.Render("a") + " Agent   - Start new agent in tab\n")
+	boxContent.WriteString(dimStyle.Render("              (status tracked, same as main)"))
+	boxContent.WriteString("\n\n")
+	boxContent.WriteString("  " + keyStyle.Render("t") + " Terminal - Open shell in project dir\n")
+	boxContent.WriteString(dimStyle.Render("              (for commands, not tracked)"))
+	boxContent.WriteString("\n\n")
+	boxContent.WriteString(helpStyle.Render("  esc: cancel"))
+	boxContent.WriteString("\n")
+
+	return m.renderOverlayDialog(" New Tab ", boxContent.String(), 50, "#7D56F4")
+}
+
+// newTabView renders the new tab creation dialog
+func (m Model) newTabView() string {
+	var boxContent strings.Builder
+	boxContent.WriteString("\n\n")
+
+	if m.newTabIsAgent {
+		boxContent.WriteString("  New Agent Tab Name:\n")
+	} else {
+		boxContent.WriteString("  New Terminal Tab Name:\n")
+	}
+	boxContent.WriteString("  " + m.nameInput.View() + "\n\n")
+	boxContent.WriteString(helpStyle.Render("  enter: create  esc: cancel"))
+	boxContent.WriteString("\n")
+
+	return m.renderOverlayDialog(" New Tab ", boxContent.String(), 50, "#7D56F4")
+}
+
+// renameTabView renders the tab rename dialog
+func (m Model) renameTabView() string {
+	var boxContent strings.Builder
+	boxContent.WriteString("\n\n")
+	boxContent.WriteString("  New Tab Name:\n")
+	boxContent.WriteString("  " + m.nameInput.View() + "\n\n")
+	boxContent.WriteString(helpStyle.Render("  enter: rename  esc: cancel"))
+	boxContent.WriteString("\n")
+
+	return m.renderOverlayDialog(" Rename Tab ", boxContent.String(), 50, "#7D56F4")
+}
+
+// newTabAgentView renders the agent selection dialog for new tab
+func (m Model) newTabAgentView() string {
+	var boxContent strings.Builder
+	boxContent.WriteString("\n\n")
+	boxContent.WriteString("  Select Agent for Tab:\n\n")
+
+	// Agent options (same as selectAgentView but for tab)
+	agents := []struct {
+		agent session.AgentType
+		icon  string
+		name  string
+	}{
+		{session.AgentClaude, "🤖", "Claude Code"},
+		{session.AgentGemini, "✨", "Gemini"},
+		{session.AgentAider, "🔧", "Aider"},
+		{session.AgentCodex, "🧠", "Codex CLI"},
+		{session.AgentAmazonQ, "📦", "Amazon Q"},
+		{session.AgentOpenCode, "💻", "OpenCode"},
+		{session.AgentCustom, "⚙️", "Custom"},
+	}
+
+	for i, a := range agents {
+		if m.newTabAgentCursor == i {
+			boxContent.WriteString(fmt.Sprintf("  ❯ %s %s\n", a.icon, a.name))
+		} else {
+			boxContent.WriteString(fmt.Sprintf("    %s %s\n", a.icon, a.name))
+		}
+	}
+
+	// Show error if any
+	if m.err != nil {
+		boxContent.WriteString("\n")
+		errStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5555")).Bold(true)
+		boxContent.WriteString(errStyle.Render(fmt.Sprintf("  ⚠ %v", m.err)))
+		boxContent.WriteString("\n")
+	}
+
+	boxContent.WriteString("\n")
+	boxContent.WriteString(helpStyle.Render("  enter: select  esc: cancel"))
+	boxContent.WriteString("\n")
+
+	return m.renderOverlayDialog(" Agent Tab ", boxContent.String(), 40, "#7D56F4")
+}
+
+// deleteChoiceView renders the delete choice dialog (session vs tab)
+func (m Model) deleteChoiceView() string {
+	keyStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#1a1a2e")).
+		Background(lipgloss.Color(ColorPurple)).
+		Bold(true).
+		Padding(0, 1)
+
+	var boxContent strings.Builder
+	boxContent.WriteString("\n\n")
+	if m.deleteTarget != nil {
+		boxContent.WriteString(fmt.Sprintf("  Session: %s\n\n", m.deleteTarget.Name))
+	}
+	boxContent.WriteString("  What to delete?\n\n")
+	boxContent.WriteString("  " + keyStyle.Render("s") + " Session - Delete entire session\n")
+	boxContent.WriteString(dimStyle.Render("            (stops and removes all tabs)"))
+	boxContent.WriteString("\n\n")
+	boxContent.WriteString("  " + keyStyle.Render("t") + " Tab     - Close current tab only\n")
+	boxContent.WriteString(dimStyle.Render("            (main agent tab cannot be closed)"))
+	boxContent.WriteString("\n\n")
+	boxContent.WriteString(helpStyle.Render("  esc: cancel"))
+	boxContent.WriteString("\n")
+
+	return m.renderOverlayDialog(" Delete ", boxContent.String(), 50, "#FF5F87")
+}
+
+// confirmDeleteTabView renders the tab deletion confirmation dialog
+func (m Model) confirmDeleteTabView() string {
+	var boxContent strings.Builder
+	boxContent.WriteString("\n\n")
+	if m.deleteTarget != nil {
+		windows := m.deleteTarget.GetWindowList()
+		for _, w := range windows {
+			if w.Active {
+				boxContent.WriteString(fmt.Sprintf("  Close tab '%s'?\n\n", w.Name))
+				break
+			}
+		}
+	}
+	boxContent.WriteString(helpStyle.Render("  y: yes  n: no"))
+	boxContent.WriteString("\n")
+
+	return m.renderOverlayDialog(" Confirm Close Tab ", boxContent.String(), 45, "#FF5F87")
+}
+
+// stopChoiceView renders the stop choice dialog (session vs tab)
+func (m Model) stopChoiceView() string {
+	keyStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#1a1a2e")).
+		Background(lipgloss.Color(ColorPurple)).
+		Bold(true).
+		Padding(0, 1)
+
+	var boxContent strings.Builder
+	boxContent.WriteString("\n\n")
+	if m.stopTarget != nil {
+		boxContent.WriteString(fmt.Sprintf("  Session: %s\n\n", m.stopTarget.Name))
+	}
+	boxContent.WriteString("  What to stop?\n\n")
+	boxContent.WriteString("  " + keyStyle.Render("s") + " Session - Stop entire session\n")
+	boxContent.WriteString(dimStyle.Render("            (kills all tabs)"))
+	boxContent.WriteString("\n\n")
+	boxContent.WriteString("  " + keyStyle.Render("t") + " Tab     - Stop current tab only\n")
+	boxContent.WriteString(dimStyle.Render("            (sends Ctrl+C/D to tab)"))
+	boxContent.WriteString("\n\n")
+	boxContent.WriteString(helpStyle.Render("  esc: cancel"))
+	boxContent.WriteString("\n")
+
+	return m.renderOverlayDialog(" Stop ", boxContent.String(), 50, "#FFA500")
+}
+
+// confirmStopTabView renders the tab stop confirmation dialog
+func (m Model) confirmStopTabView() string {
+	var boxContent strings.Builder
+	boxContent.WriteString("\n\n")
+	if m.stopTarget != nil {
+		windows := m.stopTarget.GetWindowList()
+		for _, w := range windows {
+			if w.Active {
+				boxContent.WriteString(fmt.Sprintf("  Stop tab '%s'?\n\n", w.Name))
+				break
+			}
+		}
+	}
+	boxContent.WriteString(helpStyle.Render("  y: yes  n: no"))
+	boxContent.WriteString("\n")
+
+	return m.renderOverlayDialog(" Confirm Stop Tab ", boxContent.String(), 45, "#FFA500")
 }

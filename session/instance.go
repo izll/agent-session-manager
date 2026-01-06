@@ -40,6 +40,7 @@ const (
 	AgentAmazonQ  AgentType = "amazonq"
 	AgentOpenCode AgentType = "opencode"
 	AgentCustom   AgentType = "custom"
+	AgentTerminal AgentType = "terminal" // Plain shell/terminal window
 )
 
 // AgentConfig contains configuration for each agent type
@@ -117,7 +118,16 @@ type Instance struct {
 	GroupID         string    `json:"group_id,omitempty"`          // Session group ID
 	Agent           AgentType `json:"agent,omitempty"`             // Agent type (claude, gemini, aider, custom)
 	CustomCommand   string    `json:"custom_command,omitempty"`    // Custom command for AgentCustom
-	Notes           string    `json:"notes,omitempty"`             // User notes/comments for this session
+	Notes           string           `json:"notes,omitempty"`             // User notes/comments for this session
+	FollowedWindows []FollowedWindow `json:"followed_windows,omitempty"`  // Windows tracked as agents (window 0 is main agent)
+}
+
+// FollowedWindow represents a tmux window tracked as an agent
+type FollowedWindow struct {
+	Index         int       `json:"index"`
+	Agent         AgentType `json:"agent"`
+	Name          string    `json:"name"`           // Tab name for display
+	CustomCommand string    `json:"custom_command"` // For custom agents
 }
 
 // GetAgentConfig returns the agent configuration for this instance
@@ -364,7 +374,74 @@ func (i *Instance) StartWithResume(resumeID string) error {
 	i.Status = StatusRunning
 	i.UpdatedAt = time.Now()
 
+	// Restore followed windows (tabs) if any
+	i.restoreFollowedWindows()
+
 	return nil
+}
+
+// restoreFollowedWindows recreates agent tabs after session restart
+func (i *Instance) restoreFollowedWindows() {
+	if len(i.FollowedWindows) == 0 {
+		return
+	}
+
+	sessionName := i.TmuxSessionName()
+
+	// Store old followed windows and clear the list (will be repopulated)
+	oldWindows := i.FollowedWindows
+	i.FollowedWindows = nil
+
+	for _, fw := range oldWindows {
+		var cmd *exec.Cmd
+
+		if fw.Agent == AgentTerminal {
+			// Terminal window - just create empty shell
+			cmd = exec.Command("tmux", "new-window", "-t", sessionName, "-c", i.Path, "-n", fw.Name)
+		} else {
+			// Agent window - build agent command
+			config := AgentConfigs[fw.Agent]
+			var agentCmd string
+
+			if fw.Agent == AgentCustom {
+				agentCmd = fw.CustomCommand
+			} else {
+				args := []string{}
+				if i.AutoYes && config.SupportsAutoYes && config.AutoYesFlag != "" {
+					args = append(args, config.AutoYesFlag)
+				}
+				agentCmd = config.Command
+				if len(args) > 0 {
+					agentCmd = agentCmd + " " + strings.Join(args, " ")
+				}
+			}
+
+			// Create new window with agent command
+			cmd = exec.Command("tmux", "new-window", "-t", sessionName, "-c", i.Path, "-n", fw.Name, agentCmd)
+		}
+
+		if err := cmd.Run(); err != nil {
+			continue // Skip failed windows
+		}
+
+		// Get the new window index
+		newIdx := i.GetCurrentWindowIndex()
+
+		// Set remain-on-exit so window stays open when command exits (shows as stopped)
+		target := fmt.Sprintf("%s:%d", sessionName, newIdx)
+		exec.Command("tmux", "set-option", "-t", target, "remain-on-exit", "on").Run()
+
+		// Re-add to followed windows with updated index
+		i.FollowedWindows = append(i.FollowedWindows, FollowedWindow{
+			Index:         newIdx,
+			Agent:         fw.Agent,
+			Name:          fw.Name,
+			CustomCommand: fw.CustomCommand,
+		})
+	}
+
+	// Switch back to window 0 (main agent)
+	exec.Command("tmux", "select-window", "-t", sessionName+":0").Run()
 }
 
 func (i *Instance) Stop() error {
@@ -396,6 +473,405 @@ func (i *Instance) Attach() error {
 	cmd.Stderr = os.Stderr
 
 	return cmd.Run()
+}
+
+// NewWindow creates a new tmux window in the session's directory
+func (i *Instance) NewWindow() error {
+	if i.Status != StatusRunning {
+		return fmt.Errorf("instance not running")
+	}
+
+	sessionName := i.TmuxSessionName()
+	cmd := exec.Command("tmux", "new-window", "-t", sessionName, "-c", i.Path)
+	return cmd.Run()
+}
+
+// NewWindowWithName creates a new tmux window with a specific name
+func (i *Instance) NewWindowWithName(name string) error {
+	if i.Status != StatusRunning {
+		return fmt.Errorf("instance not running")
+	}
+
+	sessionName := i.TmuxSessionName()
+	cmd := exec.Command("tmux", "new-window", "-t", sessionName, "-c", i.Path, "-n", name)
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+
+	// Track terminal window for restore on restart
+	newIdx := i.GetCurrentWindowIndex()
+	i.FollowedWindows = append(i.FollowedWindows, FollowedWindow{
+		Index: newIdx,
+		Agent: AgentTerminal,
+		Name:  name,
+	})
+
+	// Set remain-on-exit so window stays open when command exits (shows as stopped)
+	target := fmt.Sprintf("%s:%d", sessionName, newIdx)
+	exec.Command("tmux", "set-option", "-t", target, "remain-on-exit", "on").Run()
+
+	return nil
+}
+
+// RespawnWindow restarts a dead window's process
+func (i *Instance) RespawnWindow(windowIdx int) error {
+	if i.Status != StatusRunning {
+		return fmt.Errorf("instance not running")
+	}
+
+	sessionName := i.TmuxSessionName()
+	target := fmt.Sprintf("%s:%d", sessionName, windowIdx)
+
+	// Get the agent type for this window to build the command
+	var agentCmd string
+	if windowIdx == 0 {
+		// Main window - use instance's agent
+		config := i.GetAgentConfig()
+		if i.Agent == AgentCustom {
+			agentCmd = i.CustomCommand
+		} else {
+			args := []string{}
+			if i.AutoYes && config.SupportsAutoYes && config.AutoYesFlag != "" {
+				args = append(args, config.AutoYesFlag)
+			}
+			agentCmd = config.Command
+			if len(args) > 0 {
+				agentCmd = agentCmd + " " + strings.Join(args, " ")
+			}
+		}
+	} else {
+		// Followed window - find the agent type
+		for _, fw := range i.FollowedWindows {
+			if fw.Index == windowIdx {
+				if fw.Agent == AgentTerminal {
+					// Terminal - just respawn shell
+					agentCmd = ""
+				} else if fw.Agent == AgentCustom {
+					agentCmd = fw.CustomCommand
+				} else {
+					config := AgentConfigs[fw.Agent]
+					args := []string{}
+					if i.AutoYes && config.SupportsAutoYes && config.AutoYesFlag != "" {
+						args = append(args, config.AutoYesFlag)
+					}
+					agentCmd = config.Command
+					if len(args) > 0 {
+						agentCmd = agentCmd + " " + strings.Join(args, " ")
+					}
+				}
+				break
+			}
+		}
+	}
+
+	// Respawn the pane with the command
+	if agentCmd != "" {
+		return exec.Command("tmux", "respawn-pane", "-k", "-t", target, agentCmd).Run()
+	}
+	// Empty command = default shell
+	return exec.Command("tmux", "respawn-pane", "-k", "-t", target).Run()
+}
+
+// StopWindow kills the process in a tmux window (keeps window due to remain-on-exit)
+func (i *Instance) StopWindow(windowIdx int) error {
+	if i.Status != StatusRunning {
+		return fmt.Errorf("instance not running")
+	}
+
+	sessionName := i.TmuxSessionName()
+	target := fmt.Sprintf("%s:%d", sessionName, windowIdx)
+
+	// Send Ctrl+C to interrupt the process gracefully
+	exec.Command("tmux", "send-keys", "-t", target, "C-c").Run()
+
+	// Wait briefly then send Ctrl+D (EOF) to terminate shell if it's still running
+	time.Sleep(100 * time.Millisecond)
+	exec.Command("tmux", "send-keys", "-t", target, "C-d").Run()
+
+	return nil
+}
+
+// CloseWindow closes a tmux window by index and removes it from FollowedWindows
+func (i *Instance) CloseWindow(windowIdx int) error {
+	if i.Status != StatusRunning {
+		return fmt.Errorf("instance not running")
+	}
+
+	// Don't allow closing window 0 (main agent)
+	if windowIdx == 0 {
+		return fmt.Errorf("cannot close main agent window")
+	}
+
+	sessionName := i.TmuxSessionName()
+	target := fmt.Sprintf("%s:%d", sessionName, windowIdx)
+
+	// Kill the tmux window
+	cmd := exec.Command("tmux", "kill-window", "-t", target)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to close window: %w", err)
+	}
+
+	// Remove from FollowedWindows
+	for idx, fw := range i.FollowedWindows {
+		if fw.Index == windowIdx {
+			i.FollowedWindows = append(i.FollowedWindows[:idx], i.FollowedWindows[idx+1:]...)
+			break
+		}
+	}
+
+	return nil
+}
+
+// GetWindowCount returns the number of tmux windows in the session
+func (i *Instance) GetWindowCount() int {
+	if i.Status != StatusRunning {
+		return 0
+	}
+
+	sessionName := i.TmuxSessionName()
+	cmd := exec.Command("tmux", "list-windows", "-t", sessionName)
+	output, err := cmd.Output()
+	if err != nil {
+		return 0
+	}
+
+	// Count lines (each line is a window)
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	if len(lines) == 1 && lines[0] == "" {
+		return 0
+	}
+	return len(lines)
+}
+
+// GetCurrentWindowIndex returns the current (active) window index (0-based)
+func (i *Instance) GetCurrentWindowIndex() int {
+	if i.Status != StatusRunning {
+		return 0
+	}
+
+	sessionName := i.TmuxSessionName()
+	cmd := exec.Command("tmux", "display-message", "-t", sessionName, "-p", "#{window_index}")
+	output, err := cmd.Output()
+	if err != nil {
+		return 0
+	}
+
+	var idx int
+	fmt.Sscanf(strings.TrimSpace(string(output)), "%d", &idx)
+	return idx
+}
+
+// SelectWindow switches to the specified window index
+func (i *Instance) SelectWindow(index int) error {
+	if i.Status != StatusRunning {
+		return fmt.Errorf("instance not running")
+	}
+
+	sessionName := i.TmuxSessionName()
+	cmd := exec.Command("tmux", "select-window", "-t", fmt.Sprintf("%s:%d", sessionName, index))
+	return cmd.Run()
+}
+
+// NextWindow switches to the next tmux window
+func (i *Instance) NextWindow() error {
+	if i.Status != StatusRunning {
+		return fmt.Errorf("instance not running")
+	}
+
+	sessionName := i.TmuxSessionName()
+	cmd := exec.Command("tmux", "next-window", "-t", sessionName)
+	return cmd.Run()
+}
+
+// PrevWindow switches to the previous tmux window
+func (i *Instance) PrevWindow() error {
+	if i.Status != StatusRunning {
+		return fmt.Errorf("instance not running")
+	}
+
+	sessionName := i.TmuxSessionName()
+	cmd := exec.Command("tmux", "previous-window", "-t", sessionName)
+	return cmd.Run()
+}
+
+// RenameCurrentWindow renames the current tmux window
+func (i *Instance) RenameCurrentWindow(name string) error {
+	if i.Status != StatusRunning {
+		return fmt.Errorf("instance not running")
+	}
+
+	sessionName := i.TmuxSessionName()
+	cmd := exec.Command("tmux", "rename-window", "-t", sessionName, name)
+	return cmd.Run()
+}
+
+// WindowInfo contains information about a tmux window
+type WindowInfo struct {
+	Index    int
+	Name     string
+	Active   bool
+	Followed bool      // Whether this window is tracked as an agent
+	Agent    AgentType // Agent type if followed
+	Dead     bool      // Whether the window's pane has exited (command finished)
+}
+
+// IsWindowFollowed checks if a window index is being tracked as an agent
+func (i *Instance) IsWindowFollowed(index int) bool {
+	// Window 0 is always followed (main agent)
+	if index == 0 {
+		return true
+	}
+	for _, fw := range i.FollowedWindows {
+		if fw.Index == index {
+			return true
+		}
+	}
+	return false
+}
+
+// GetFollowedWindow returns the FollowedWindow for a given index, or nil if not followed
+func (i *Instance) GetFollowedWindow(index int) *FollowedWindow {
+	// Window 0 is the main agent
+	if index == 0 {
+		return &FollowedWindow{Index: 0, Agent: i.Agent, Name: i.Name}
+	}
+	for idx := range i.FollowedWindows {
+		if i.FollowedWindows[idx].Index == index {
+			return &i.FollowedWindows[idx]
+		}
+	}
+	return nil
+}
+
+// ToggleWindowFollow toggles the follow status of a window
+func (i *Instance) ToggleWindowFollow(index int) bool {
+	// Can't unfollow window 0
+	if index == 0 {
+		return true
+	}
+
+	// Check if already followed
+	for idx, fw := range i.FollowedWindows {
+		if fw.Index == index {
+			// Remove from followed
+			i.FollowedWindows = append(i.FollowedWindows[:idx], i.FollowedWindows[idx+1:]...)
+			return false
+		}
+	}
+
+	// Add to followed with default agent (same as main)
+	i.FollowedWindows = append(i.FollowedWindows, FollowedWindow{
+		Index: index,
+		Agent: i.Agent,
+		Name:  "",
+	})
+	return true
+}
+
+// GetAllFollowedAgents returns info about all followed agents (including main window 0)
+func (i *Instance) GetAllFollowedAgents() []FollowedWindow {
+	result := []FollowedWindow{
+		{Index: 0, Agent: i.Agent, Name: i.Name},
+	}
+	result = append(result, i.FollowedWindows...)
+	return result
+}
+
+// GetWindowList returns information about all windows in the session
+func (i *Instance) GetWindowList() []WindowInfo {
+	if i.Status != StatusRunning {
+		return nil
+	}
+
+	sessionName := i.TmuxSessionName()
+	// Format: index:name:active_flag:pane_dead
+	cmd := exec.Command("tmux", "list-windows", "-t", sessionName, "-F", "#{window_index}:#{window_name}:#{window_active}:#{pane_dead}")
+	output, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+
+	var windows []WindowInfo
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, ":", 4)
+		if len(parts) >= 4 {
+			var idx int
+			fmt.Sscanf(parts[0], "%d", &idx)
+
+			// Get agent type if followed
+			var agent AgentType
+			followed := i.IsWindowFollowed(idx)
+			if followed {
+				if fw := i.GetFollowedWindow(idx); fw != nil {
+					agent = fw.Agent
+				}
+			}
+
+			windows = append(windows, WindowInfo{
+				Index:    idx,
+				Name:     parts[1],
+				Active:   parts[2] == "1",
+				Followed: followed,
+				Agent:    agent,
+				Dead:     parts[3] == "1",
+			})
+		}
+	}
+	return windows
+}
+
+// NewAgentWindow creates a new tmux window running the specified agent
+func (i *Instance) NewAgentWindow(name string, agent AgentType, customCmd string) (int, error) {
+	if i.Status != StatusRunning {
+		return -1, fmt.Errorf("instance not running")
+	}
+
+	sessionName := i.TmuxSessionName()
+
+	// Build agent command based on agent type
+	config := AgentConfigs[agent]
+	var agentCmd string
+
+	if agent == AgentCustom {
+		agentCmd = customCmd
+	} else {
+		args := []string{}
+		// Use instance's AutoYes setting for the new agent too
+		if i.AutoYes && config.SupportsAutoYes && config.AutoYesFlag != "" {
+			args = append(args, config.AutoYesFlag)
+		}
+		agentCmd = config.Command
+		if len(args) > 0 {
+			agentCmd = agentCmd + " " + strings.Join(args, " ")
+		}
+	}
+
+	// Create new window with agent command
+	cmd := exec.Command("tmux", "new-window", "-t", sessionName, "-c", i.Path, "-n", name, agentCmd)
+	if err := cmd.Run(); err != nil {
+		return -1, err
+	}
+
+	// Get the new window index
+	newIdx := i.GetCurrentWindowIndex()
+
+	// Add to followed windows with agent info
+	i.FollowedWindows = append(i.FollowedWindows, FollowedWindow{
+		Index:         newIdx,
+		Agent:         agent,
+		Name:          name,
+		CustomCommand: customCmd,
+	})
+
+	// Set remain-on-exit so window stays open when command exits (shows as stopped)
+	target := fmt.Sprintf("%s:%d", sessionName, newIdx)
+	exec.Command("tmux", "set-option", "-t", target, "remain-on-exit", "on").Run()
+
+	return newIdx, nil
 }
 
 func (i *Instance) IsAlive() bool {
@@ -437,6 +913,7 @@ func (i *Instance) GetPreview(lines int) (string, error) {
 	}
 
 	sessionName := i.TmuxSessionName()
+	// Capture from the currently active window (follows tab switching)
 	// Capture pane with scrollback history (-S for start line, -E for end)
 	// -S -lines means start from 'lines' back in history
 	// -e preserves colors, -J joins wrapped lines
@@ -501,9 +978,12 @@ func (i *Instance) GetLastLine() string {
 	}
 
 	sessionName := i.TmuxSessionName()
+	// Always capture from window 0 (the agent window), not the currently active window
+	// This ensures we always show the agent's status even when user is on another tab
+	target := sessionName + ":0"
 	// Capture last 50 lines with colors (-e flag preserves ANSI escape sequences)
 	// -J flag joins wrapped lines (prevents terminal width wrapping issues)
-	cmd := exec.Command("tmux", "capture-pane", "-t", sessionName, "-p", "-e", "-J", "-S", "-50")
+	cmd := exec.Command("tmux", "capture-pane", "-t", target, "-p", "-e", "-J", "-S", "-50")
 	output, err := cmd.Output()
 	if err != nil {
 		return "..."
@@ -546,6 +1026,60 @@ func (i *Instance) GetLastLine() string {
 		}
 
 		// Found actual content - return with colors
+		return line
+	}
+
+	return "..."
+}
+
+// GetLastLineForWindow returns the last meaningful line from a specific window
+func (i *Instance) GetLastLineForWindow(windowIdx int, agent AgentType) string {
+	if !i.IsAlive() {
+		return "stopped"
+	}
+
+	sessionName := i.TmuxSessionName()
+	target := fmt.Sprintf("%s:%d", sessionName, windowIdx)
+	cmd := exec.Command("tmux", "capture-pane", "-t", target, "-p", "-e", "-J", "-S", "-50")
+	output, err := cmd.Output()
+	if err != nil {
+		return "..."
+	}
+
+	lines := strings.Split(strings.TrimRight(string(output), "\n"), "\n")
+
+	agentName := string(agent)
+	if agentName == "" {
+		agentName = "claude"
+	}
+
+	// Claude Code special handling
+	if agentName == "claude" {
+		result := GetClaudeStatusLine(lines, stripANSI)
+		if result != "" {
+			return result
+		}
+	}
+
+	// Find last meaningful line
+	agentFilters := filters.LoadFilters()
+	for j := len(lines) - 1; j >= 0; j-- {
+		line := lines[j]
+		cleanLine := strings.TrimSpace(stripANSI(line))
+		if cleanLine == "" {
+			continue
+		}
+
+		if config, ok := agentFilters[agentName]; ok {
+			skip, content := filters.ApplyFilter(config, cleanLine)
+			if skip {
+				continue
+			}
+			if content != "" {
+				return content
+			}
+		}
+
 		return line
 	}
 

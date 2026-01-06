@@ -158,13 +158,96 @@ func (m Model) buildPreviewPane(contentHeight int) string {
 		return rightPane.String()
 	}
 
-	// Instance info with styled labels and values
-	rightPane.WriteString("  " + projectLabelStyle.Render("Path: ") + projectNameStyle.Render(inst.Path))
-	rightPane.WriteString("\n")
+	// Get window list for tab display
+	windows := inst.GetWindowList()
+	var activeWindow *session.WindowInfo
+	for i := range windows {
+		if windows[i].Active {
+			activeWindow = &windows[i]
+			break
+		}
+	}
 
-	// Show agent type
+	// Display tmux tabs if more than 1 window (at top, before session info)
+	if len(windows) > 1 {
+		tabBorderStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorDarkGray))
+		tabStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorLightGray))
+		activeTabStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorWhite)).Bold(true)
+		var tabs strings.Builder
+		tabs.WriteString(tabBorderStyle.Render("│"))
+		for i, w := range windows {
+			tabName := w.Name
+			// Add status indicator
+			tabIndicator := ""
+			if w.Dead {
+				// Tab process has exited - show stopped indicator
+				tabIndicator = stoppedStyle.Render("○ ")
+			} else if w.Followed {
+				// Check if this is a terminal window
+				isTerminal := false
+				for _, fw := range inst.FollowedWindows {
+					if fw.Index == w.Index && fw.Agent == session.AgentTerminal {
+						isTerminal = true
+						break
+					}
+				}
+				// Only show activity indicator for non-terminal agents
+				if !isTerminal {
+					activity := inst.DetectActivityForWindow(w.Index)
+					switch activity {
+					case session.ActivityWaiting:
+						tabIndicator = waitingStyle.Render("● ")
+					case session.ActivityBusy:
+						tabIndicator = activeStyle.Render("● ")
+					default:
+						tabIndicator = idleStyle.Render("● ")
+					}
+				}
+			}
+			// Truncate long names
+			if len(tabName) > 10 {
+				tabName = tabName[:9] + "…"
+			}
+			if w.Active {
+				tabs.WriteString(" " + tabIndicator + activeTabStyle.Render(tabName) + " ")
+			} else {
+				tabs.WriteString(" " + tabIndicator + tabStyle.Render(tabName) + " ")
+			}
+			if i < len(windows)-1 {
+				tabs.WriteString(tabBorderStyle.Render("│"))
+			}
+		}
+		tabs.WriteString(tabBorderStyle.Render("│"))
+		rightPane.WriteString("  " + tabs.String())
+		rightPane.WriteString("\n")
+		rightPane.WriteString(dimStyle.Render(strings.Repeat("─", previewWidth)))
+		rightPane.WriteString("\n")
+	}
+
+	// Determine agent info based on active tab
 	agentName := "Claude Code"
-	switch inst.Agent {
+	agentType := inst.Agent
+	customCmd := inst.CustomCommand
+	autoYes := inst.AutoYes
+	resumeID := inst.ResumeSessionID
+	notes := inst.Notes
+
+	// If active window is a followed agent tab, show that agent's info
+	if activeWindow != nil && activeWindow.Followed {
+		for _, fw := range inst.FollowedWindows {
+			if fw.Index == activeWindow.Index {
+				agentType = fw.Agent
+				customCmd = fw.CustomCommand
+				autoYes = false // Followed windows don't have separate autoYes
+				resumeID = ""   // Followed windows don't have resume
+				notes = ""      // Notes are per session, not per tab
+				break
+			}
+		}
+	}
+
+	// Get agent name from type
+	switch agentType {
 	case session.AgentGemini:
 		agentName = "Gemini"
 	case session.AgentAider:
@@ -178,8 +261,13 @@ func (m Model) buildPreviewPane(contentHeight int) string {
 	case session.AgentCustom:
 		agentName = "Custom"
 	}
+
+	// Instance info with styled labels and values
+	rightPane.WriteString("  " + projectLabelStyle.Render("Path: ") + projectNameStyle.Render(inst.Path))
+	rightPane.WriteString("\n")
+
 	// Show yolo mode for Claude on same line
-	if (inst.Agent == session.AgentClaude || inst.Agent == "") && inst.AutoYes {
+	if (agentType == session.AgentClaude || agentType == "") && autoYes {
 		yoloStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorOrange))
 		rightPane.WriteString("  " + projectLabelStyle.Render("Agent: ") + projectNameStyle.Render(agentName) + yoloStyle.Render(" ! YOLO"))
 	} else {
@@ -187,20 +275,20 @@ func (m Model) buildPreviewPane(contentHeight int) string {
 	}
 	rightPane.WriteString("\n")
 
-	if inst.Agent == session.AgentCustom && inst.CustomCommand != "" {
-		rightPane.WriteString("  " + projectLabelStyle.Render("Command: ") + projectNameStyle.Render(inst.CustomCommand))
+	if agentType == session.AgentCustom && customCmd != "" {
+		rightPane.WriteString("  " + projectLabelStyle.Render("Command: ") + projectNameStyle.Render(customCmd))
 		rightPane.WriteString("\n")
 	}
 
-	if inst.ResumeSessionID != "" {
-		rightPane.WriteString("  " + projectLabelStyle.Render("Resume: ") + projectNameStyle.Render(inst.ResumeSessionID[:8]))
+	if resumeID != "" {
+		rightPane.WriteString("  " + projectLabelStyle.Render("Resume: ") + projectNameStyle.Render(resumeID[:8]))
 		rightPane.WriteString("\n")
 	}
 
 	// Display notes if any (truncated to fit)
-	if inst.Notes != "" {
+	if notes != "" {
 		// Show first line of notes or truncate if too long
-		notesPreview := inst.Notes
+		notesPreview := notes
 		if idx := strings.Index(notesPreview, "\n"); idx != -1 {
 			notesPreview = notesPreview[:idx] + "…"
 		}

@@ -304,6 +304,22 @@ func (m Model) handleListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+down":
 		m.handleMoveSessionDown()
 
+	case "ctrl+left", "[":
+		// Switch to previous tmux window/tab
+		if inst := m.getSelectedInstance(); inst != nil {
+			if inst.Status == session.StatusRunning {
+				inst.PrevWindow()
+			}
+		}
+
+	case "ctrl+right", "]":
+		// Switch to next tmux window/tab
+		if inst := m.getSelectedInstance(); inst != nil {
+			if inst.Status == session.StatusRunning {
+				inst.NextWindow()
+			}
+		}
+
 	case "shift+up", "pgup", "shift+pgup", "K":
 		// Scroll preview up - fetch extended content on first scroll
 		if m.scrollContent == "" {
@@ -421,7 +437,20 @@ func (m Model) handleListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "x":
-		m.handleStopSession()
+		// Stop session or tab
+		if inst := m.getSelectedInstance(); inst != nil {
+			if inst.Status == session.StatusRunning {
+				m.stopTarget = inst
+				// If multiple tabs, ask what to stop
+				windows := inst.GetWindowList()
+				if len(windows) > 1 {
+					m.state = stateStopChoice
+					return m, nil
+				}
+			}
+			// Otherwise just confirm session stop
+			m.handleStopSession()
+		}
 
 	case "d":
 		// Check if a group is selected
@@ -444,9 +473,18 @@ func (m Model) handleListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		}
-		// Delete session
+		// Delete session or tab
 		if inst := m.getSelectedInstance(); inst != nil {
 			m.deleteTarget = inst
+			// If running and has multiple tabs, ask what to delete
+			if inst.Status == session.StatusRunning {
+				windows := inst.GetWindowList()
+				if len(windows) > 1 {
+					m.state = stateDeleteChoice
+					return m, nil
+				}
+			}
+			// Otherwise just confirm session delete
 			m.state = stateConfirmDelete
 		}
 
@@ -494,9 +532,76 @@ func (m Model) handleListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.compactList = !m.compactList
 		m.saveSettings()
 
-	case "t":
+	case "o":
 		m.hideStatusLines = !m.hideStatusLines
 		m.saveSettings()
+
+	case "t":
+		// Open new tmux tab/window - ask Agent or Terminal
+		if inst := m.getSelectedInstance(); inst != nil {
+			if inst.Status == session.StatusRunning {
+				m.state = stateNewTabChoice
+				return m, nil
+			}
+		}
+
+	case "ctrl+f":
+		// Toggle follow on current tab
+		if inst := m.getSelectedInstance(); inst != nil {
+			if inst.Status == session.StatusRunning {
+				currentIdx := inst.GetCurrentWindowIndex()
+				if currentIdx > 0 { // Can't unfollow window 0
+					followed := inst.ToggleWindowFollow(currentIdx)
+					m.storage.UpdateInstance(inst)
+					if followed {
+						m.err = fmt.Errorf("Tab is now tracked as agent")
+					} else {
+						m.err = fmt.Errorf("Tab is no longer tracked")
+					}
+					m.previousState = stateList
+					m.state = stateError
+					return m, nil
+				}
+			}
+		}
+
+	case "T":
+		// Rename current tmux tab/window
+		if inst := m.getSelectedInstance(); inst != nil {
+			if inst.Status == session.StatusRunning {
+				windows := inst.GetWindowList()
+				for _, w := range windows {
+					if w.Active {
+						m.nameInput.SetValue(w.Name)
+						m.nameInput.CursorEnd()
+						m.nameInput.Focus()
+						break
+					}
+				}
+				m.state = stateRenameTab
+				return m, textinput.Blink
+			}
+		}
+
+	case "W":
+		// Close current tmux tab/window (not window 0)
+		if inst := m.getSelectedInstance(); inst != nil {
+			if inst.Status == session.StatusRunning {
+				windows := inst.GetWindowList()
+				for _, w := range windows {
+					if w.Active && w.Index != 0 {
+						if err := inst.CloseWindow(w.Index); err != nil {
+							m.err = err
+							m.previousState = stateList
+							m.state = stateError
+							return m, nil
+						}
+						m.storage.UpdateInstance(inst)
+						break
+					}
+				}
+			}
+		}
 
 	case "I":
 		m.showAgentIcons = !m.showAgentIcons

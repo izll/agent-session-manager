@@ -350,6 +350,23 @@ func (m Model) handleConfirmDeleteKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// handleConfirmStopKeys handles keyboard input in the stop confirmation dialog
+func (m Model) handleConfirmStopKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "y", "Y":
+		if m.stopTarget != nil {
+			m.stopTarget.Stop()
+			m.storage.UpdateInstance(m.stopTarget)
+		}
+		m.stopTarget = nil
+		m.state = stateList
+	case "n", "N", "esc":
+		m.stopTarget = nil
+		m.state = stateList
+	}
+	return m, nil
+}
+
 // handleConfirmStartKeys handles keyboard input in the auto-start confirmation dialog
 func (m Model) handleConfirmStartKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
@@ -783,7 +800,12 @@ func (m Model) handleCustomCmdKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		m.err = nil
-		m.state = stateSelectAgent
+		// Return to appropriate state based on context
+		if m.newTabIsAgent && m.newTabAgent == session.AgentCustom {
+			m.state = stateNewTabAgent
+		} else {
+			m.state = stateSelectAgent
+		}
 		return m, nil
 
 	case "enter":
@@ -797,8 +819,17 @@ func (m Model) handleCustomCmdKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 			}
 
-			// Command exists, proceed to path input
+			// Command exists, proceed based on context
 			m.err = nil
+			if m.newTabIsAgent && m.newTabAgent == session.AgentCustom {
+				// Creating agent tab with custom command - go to name input
+				m.nameInput.SetValue("")
+				m.nameInput.Focus()
+				m.state = stateNewTab
+				return m, textinput.Blink
+			}
+
+			// Creating new session - proceed to path input
 			m.pathInput.SetValue("")
 			m.pathInput.Focus()
 			m.state = stateNewPath
@@ -840,4 +871,258 @@ func (m Model) handleNotesKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.notesInput, cmd = m.notesInput.Update(msg)
 	return m, cmd
+}
+
+// handleNewTabChoiceKeys handles keyboard input in the tab type choice dialog
+func (m Model) handleNewTabChoiceKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.state = stateList
+		return m, nil
+	case "a", "A":
+		// Agent tab - first select which agent
+		m.newTabIsAgent = true
+		m.newTabAgentCursor = 0
+		m.err = nil
+		m.state = stateNewTabAgent
+		return m, nil
+	case "t", "T":
+		// Terminal tab
+		m.newTabIsAgent = false
+		m.nameInput.SetValue("")
+		m.nameInput.Focus()
+		m.state = stateNewTab
+		return m, textinput.Blink
+	}
+	return m, nil
+}
+
+// handleNewTabKeys handles keyboard input in the new tab dialog
+func (m Model) handleNewTabKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.state = stateList
+		return m, nil
+	case "enter":
+		if inst := m.getSelectedInstance(); inst != nil {
+			if inst.Status == session.StatusRunning {
+				name := m.nameInput.Value()
+				if name == "" {
+					if m.newTabIsAgent {
+						name = "agent"
+					} else {
+						name = "shell"
+					}
+				}
+
+				if m.newTabIsAgent {
+					// Create agent window (tracked) with selected agent type
+					customCmd := ""
+					if m.newTabAgent == session.AgentCustom {
+						customCmd = m.customCmdInput.Value()
+					}
+					inst.NewAgentWindow(name, m.newTabAgent, customCmd)
+				} else {
+					// Create terminal window (tracked for restore)
+					inst.NewWindowWithName(name)
+				}
+				m.storage.UpdateInstance(inst) // Save followed windows
+			}
+		}
+		m.state = stateList
+		return m, nil
+	}
+
+	var cmd tea.Cmd
+	m.nameInput, cmd = m.nameInput.Update(msg)
+	return m, cmd
+}
+
+// handleRenameTabKeys handles keyboard input in the rename tab dialog
+func (m Model) handleRenameTabKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.state = stateList
+		return m, nil
+	case "enter":
+		if m.nameInput.Value() != "" {
+			if inst := m.getSelectedInstance(); inst != nil {
+				if inst.Status == session.StatusRunning {
+					inst.RenameCurrentWindow(m.nameInput.Value())
+				}
+			}
+		}
+		m.state = stateList
+		return m, nil
+	}
+
+	var cmd tea.Cmd
+	m.nameInput, cmd = m.nameInput.Update(msg)
+	return m, cmd
+}
+
+// handleNewTabAgentKeys handles keyboard input in the agent selection dialog for new tab
+func (m Model) handleNewTabAgentKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Clear error on navigation
+	if msg.String() == "up" || msg.String() == "k" || msg.String() == "down" || msg.String() == "j" {
+		m.err = nil
+	}
+
+	switch msg.String() {
+	case "esc":
+		m.err = nil
+		m.state = stateList
+		return m, nil
+
+	case "up", "k":
+		if m.newTabAgentCursor > 0 {
+			m.newTabAgentCursor--
+		}
+
+	case "down", "j":
+		if m.newTabAgentCursor < len(agentTypes)-1 {
+			m.newTabAgentCursor++
+		}
+
+	case "enter":
+		m.newTabAgent = agentTypes[m.newTabAgentCursor]
+
+		// If custom agent, ask for command first
+		if m.newTabAgent == session.AgentCustom {
+			m.err = nil
+			m.customCmdInput.SetValue("")
+			m.customCmdInput.Focus()
+			m.state = stateCustomCmd
+			// Store that we're coming from tab creation
+			m.newTabIsAgent = true
+			return m, textinput.Blink
+		}
+
+		// Check if the agent command exists
+		config := session.AgentConfigs[m.newTabAgent]
+		if _, err := exec.LookPath(config.Command); err != nil {
+			m.err = fmt.Errorf("'%s' not found - is it installed?", config.Command)
+			return m, nil
+		}
+
+		// Command exists, proceed to name input
+		m.err = nil
+		m.nameInput.SetValue("")
+		m.nameInput.Focus()
+		m.state = stateNewTab
+		return m, textinput.Blink
+	}
+
+	return m, nil
+}
+
+// handleDeleteChoiceKeys handles keyboard input in the delete choice dialog
+func (m Model) handleDeleteChoiceKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "s", "S":
+		// Delete session
+		m.state = stateConfirmDelete
+		return m, nil
+	case "t", "T":
+		// Delete tab - check if on main window (can't delete)
+		if m.deleteTarget != nil {
+			windows := m.deleteTarget.GetWindowList()
+			for _, w := range windows {
+				if w.Active {
+					if w.Index == 0 {
+						m.err = fmt.Errorf("cannot close main agent tab")
+						m.previousState = stateList
+						m.state = stateError
+						m.deleteTarget = nil
+						return m, nil
+					}
+					// Not main tab, confirm deletion
+					m.state = stateConfirmDeleteTab
+					return m, nil
+				}
+			}
+		}
+		m.deleteTarget = nil
+		m.state = stateList
+	case "esc":
+		m.deleteTarget = nil
+		m.state = stateList
+	}
+	return m, nil
+}
+
+// handleConfirmDeleteTabKeys handles keyboard input in the tab deletion confirmation dialog
+func (m Model) handleConfirmDeleteTabKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "y", "Y":
+		if m.deleteTarget != nil {
+			windows := m.deleteTarget.GetWindowList()
+			for _, w := range windows {
+				if w.Active && w.Index != 0 {
+					if err := m.deleteTarget.CloseWindow(w.Index); err != nil {
+						m.err = err
+						m.previousState = stateList
+						m.state = stateError
+					} else {
+						m.storage.UpdateInstance(m.deleteTarget)
+					}
+					break
+				}
+			}
+		}
+		m.deleteTarget = nil
+		m.state = stateList
+	case "n", "N", "esc":
+		m.deleteTarget = nil
+		m.state = stateList
+	}
+	return m, nil
+}
+
+// handleStopChoiceKeys handles keyboard input in the stop choice dialog
+func (m Model) handleStopChoiceKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "s", "S":
+		// Stop session
+		m.state = stateConfirmStop
+		return m, nil
+	case "t", "T":
+		// Stop tab - confirm first
+		if m.stopTarget != nil {
+			m.state = stateConfirmStopTab
+			return m, nil
+		}
+		m.stopTarget = nil
+		m.state = stateList
+	case "esc":
+		m.stopTarget = nil
+		m.state = stateList
+	}
+	return m, nil
+}
+
+// handleConfirmStopTabKeys handles keyboard input in the tab stop confirmation dialog
+func (m Model) handleConfirmStopTabKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "y", "Y":
+		if m.stopTarget != nil {
+			windows := m.stopTarget.GetWindowList()
+			for _, w := range windows {
+				if w.Active {
+					if err := m.stopTarget.StopWindow(w.Index); err != nil {
+						m.err = err
+						m.previousState = stateList
+						m.state = stateError
+					}
+					break
+				}
+			}
+		}
+		m.stopTarget = nil
+		m.state = stateList
+	case "n", "N", "esc":
+		m.stopTarget = nil
+		m.state = stateList
+	}
+	return m, nil
 }

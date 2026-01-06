@@ -149,8 +149,8 @@ func getDefaultFilters() AgentFilters {
 			MinSeparators: 20,
 		},
 		"gemini": {
-			SkipContains:  []string{"Type your message"},
-			SkipPrefixes:  []string{"╭", "╰", "│", ">", "~/"},
+			SkipContains:  []string{"Type your message", "no sandbox", "/model", "Auto (Gemini"},
+			SkipPrefixes:  []string{"╭", "╰", "│", ">", "~/", "~"},
 			MinSeparators: 20,
 		},
 		"aider": {

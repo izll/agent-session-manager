@@ -24,8 +24,10 @@ A powerful terminal UI (TUI) application for managing multiple AI coding assista
 - **Parallel Sessions** - Start multiple instances of the same session with different names for working on multiple tasks
 - **Live Preview** - Real-time preview of agent output with ANSI color support and proper wide character handling
 - **Session Resume** - Resume previous conversations for Claude, Gemini, Codex, OpenCode, and Amazon Q
-- **Activity Indicators** - Visual indicators showing active vs idle sessions
+- **Activity Indicators** - Visual indicators showing active vs idle sessions with per-tab tracking
 - **Agent Icons** - Toggle display of agent type icons (🤖💎🔧📦🦜💻⚙️) in session list
+- **Multi-Tab Sessions** - Run multiple agents or terminals within a single session
+- **Terminal Tabs** - Open shell tabs alongside agent tabs for commands and utilities
 - **Custom Colors** - Personalize sessions with foreground colors, background colors, and gradients
 - **Prompt Sending** - Send messages to running sessions without attaching (improved reliability for all agents)
 - **Session Reordering** - Organize sessions with keyboard shortcuts
@@ -82,7 +84,7 @@ chmod +x install.sh
 Install options:
 ```bash
 ./install.sh              # Install latest version to ~/.local/bin
-./install.sh -v 0.5.2     # Install specific version
+./install.sh -v 0.6.0     # Install specific version
 ./install.sh -d /usr/local/bin  # Install to custom directory
 ./install.sh -u           # Update existing installation
 ```
@@ -92,15 +94,15 @@ Install options:
 **Debian/Ubuntu (.deb):**
 ```bash
 # Download from releases
-wget https://github.com/izll/agent-session-manager/releases/download/v0.5.2/asmgr_0.5.2_linux_amd64.deb
-sudo dpkg -i asmgr_0.5.2_linux_amd64.deb
+wget https://github.com/izll/agent-session-manager/releases/download/v0.6.0/asmgr_0.6.0_linux_amd64.deb
+sudo dpkg -i asmgr_0.6.0_linux_amd64.deb
 ```
 
 **RedHat/Fedora/Rocky (.rpm):**
 ```bash
 # Download from releases
-wget https://github.com/izll/agent-session-manager/releases/download/v0.5.2/asmgr_0.5.2_linux_x86_64.rpm
-sudo rpm -i asmgr_0.5.2_linux_x86_64.rpm
+wget https://github.com/izll/agent-session-manager/releases/download/v0.6.0/asmgr_0.6.0_linux_x86_64.rpm
+sudo rpm -i asmgr_0.6.0_linux_x86_64.rpm
 ```
 
 ### Build from Source
@@ -182,13 +184,23 @@ asmgr
 | `Enter` | Start (if stopped) and attach to session |
 | `s` | Start session without attaching |
 | `a` | Start session with options: replace current or start parallel instance |
-| `x` | Stop session |
+| `x` | Stop session or tab (asks which when multiple tabs exist) |
 | `n` | Create new session instance |
 | `e` | Rename session |
 | `r` | Resume previous conversation or start new (supports Claude, Gemini, Codex, OpenCode, Amazon Q) |
 | `p` | Send prompt/message to running session |
 | `N` | Add/edit session notes |
-| `d` | Delete session |
+| `d` | Delete session or tab (asks which when multiple tabs exist) |
+
+#### Tabs (Multi-Window Sessions)
+| Key | Action |
+|-----|--------|
+| `t` | Create new tab (choose Agent or Terminal) |
+| `T` | Rename current tab |
+| `W` | Quick close current tab |
+| `[` / `]` | Switch between tabs |
+| `Ctrl+←` / `Ctrl+→` | Switch between tabs (alternative) |
+| `Ctrl+f` | Toggle tab tracking (follow/unfollow) |
 
 #### Groups
 | Key | Action |
@@ -312,6 +324,41 @@ Use notes to track:
 - TODOs and reminders
 - Handoff notes when switching between sessions
 
+## Tabs (Multi-Window Sessions)
+
+Each session can have multiple tabs (tmux windows) for running additional agents or terminals:
+
+### Creating Tabs
+
+Press `t` to create a new tab. You'll be asked to choose:
+
+- **Agent** - Start another AI agent (Claude, Gemini, etc.) in a new tab
+- **Terminal** - Open a plain shell for running commands
+
+### Tab Features
+
+- **Activity Tracking** - Agent tabs show activity indicators (●/○) in the tab bar
+- **Persistent** - Tabs are restored when you stop/start a session
+- **Stopped State** - When a tab's process exits (e.g., Ctrl+D), it shows as stopped (○) instead of disappearing
+- **Per-Tab Status** - Status lines under sessions show output from each tracked tab
+
+### Tab Navigation
+
+```
+│● main │○ terminal │● claude-2 │
+```
+
+- Press `[` or `]` to switch between tabs
+- Press `Ctrl+←` or `Ctrl+→` as alternatives
+- Press `Ctrl+f` to toggle tracking on the current tab
+
+### Stop/Delete with Multiple Tabs
+
+When you have multiple tabs:
+- Press `x` (stop) → asks: stop **session** or just this **tab**?
+- Press `d` (delete) → asks: delete **session** or close this **tab**?
+- Press `W` for quick tab close (no confirmation)
+
 ## Split View
 
 Compare two sessions side-by-side:
@@ -334,7 +381,7 @@ When you start ASMGR, you'll see the project selector:
 ```
 ┌─────────────────────────────────────┐
 │  Agent Session Manager              │
-│             v0.5.0                  │
+│             v0.6.0                  │
 ├─────────────────────────────────────┤
 │  > Backend API         [5 sessions] │
 │    Frontend App        [3 sessions] │
@@ -359,12 +406,16 @@ Press `i` in the project selector to import sessions from the default (no projec
 
 ## Activity Indicators
 
-Sessions show different status indicators:
+Sessions and tabs show different status indicators:
 
-- `●` Orange - Active (agent is working)
-- `●` Blue - Waiting (waiting for user permission/input)
-- `●` Gray - Idle (ready for new prompt)
-- `○` Red outline - Stopped
+- `●` Orange - **Busy** (agent is working/generating)
+- `●` Cyan - **Waiting** (waiting for user permission/input)
+- `●` Gray - **Idle** (ready for new prompt)
+- `○` Red - **Stopped** (session or tab not running)
+
+Each tab in a session has its own activity indicator, shown in:
+- The tab bar at the top of the preview
+- Status lines under sessions (when enabled with `o`)
 
 ## Configuration
 

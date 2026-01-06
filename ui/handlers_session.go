@@ -43,6 +43,15 @@ func (m *Model) handleEnterSession() tea.Cmd {
 			return nil
 		}
 		m.storage.UpdateInstance(inst)
+	} else {
+		// Session is running - check if active tab is dead and respawn it
+		windows := inst.GetWindowList()
+		for _, w := range windows {
+			if w.Active && w.Dead {
+				inst.RespawnWindow(w.Index)
+				break
+			}
+		}
 	}
 	sessionName := inst.TmuxSessionName()
 	// Configure tmux for proper terminal resize following (ignore errors - non-critical)
@@ -122,15 +131,15 @@ func (m *Model) handleStartSession() {
 	}
 }
 
-// handleStopSession stops the selected session
+// handleStopSession shows confirmation dialog for stopping the selected session
 func (m *Model) handleStopSession() {
 	inst := m.getSelectedInstance()
 	if inst == nil {
 		return
 	}
 	if inst.Status == session.StatusRunning {
-		inst.Stop()
-		m.storage.UpdateInstance(inst)
+		m.stopTarget = inst
+		m.state = stateConfirmStop
 	}
 }
 

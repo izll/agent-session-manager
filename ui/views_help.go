@@ -12,13 +12,6 @@ func (m Model) helpView() string {
 	var b strings.Builder
 
 	// Styles
-	headerStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorWhite)).
-		Background(lipgloss.Color(ColorPurple)).
-		Bold(true).
-		Padding(0, 2).
-		MarginBottom(1)
-
 	sectionStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(ColorPurple)).
 		Bold(true)
@@ -39,6 +32,10 @@ func (m Model) helpView() string {
 		Foreground(lipgloss.Color(ColorLightGray)).
 		Italic(true)
 
+	noteStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(ColorYellow)).
+		Italic(true)
+
 	// Title
 	title := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(ColorWhite)).
@@ -50,140 +47,163 @@ func (m Model) helpView() string {
 	b.WriteString(lipgloss.PlaceHorizontal(m.width, lipgloss.Center, title))
 	b.WriteString("\n\n")
 
-	// Quick reference - keyboard shortcuts in a row
-	b.WriteString(sectionStyle.Render("  ⌨  Quick Reference"))
-	b.WriteString("\n")
-	b.WriteString(separatorStyle.Render("  " + strings.Repeat("─", 60)))
-	b.WriteString("\n\n")
-
-	// Row 1: Navigation
-	navKeys := []string{
-		keyStyle.Render("↑/k") + descStyle.Render(" up"),
-		keyStyle.Render("↓/j") + descStyle.Render(" down"),
-		keyStyle.Render("^↑") + descStyle.Render(" move"),
-		keyStyle.Render("⇧↑") + descStyle.Render(" scroll"),
-	}
-	b.WriteString("  " + strings.Join(navKeys, "  "))
-	b.WriteString("\n\n")
-
-	// Row 2: Session actions
-	actionKeys := []string{
-		keyStyle.Render("↵") + descStyle.Render(" attach"),
-		keyStyle.Render("n") + descStyle.Render(" new"),
-		keyStyle.Render("s") + descStyle.Render(" start"),
-		keyStyle.Render("a") + descStyle.Render(" replace/start"),
-		keyStyle.Render("x") + descStyle.Render(" stop"),
-		keyStyle.Render("d") + descStyle.Render(" delete"),
-		keyStyle.Render("e") + descStyle.Render(" rename"),
-	}
-	b.WriteString("  " + strings.Join(actionKeys, "  "))
-	b.WriteString("\n\n")
-
-	// Row 3: Features
-	featureKeys := []string{
-		keyStyle.Render("r") + descStyle.Render(" resume"),
-		keyStyle.Render("p") + descStyle.Render(" prompt"),
-		keyStyle.Render("N") + descStyle.Render(" notes"),
-		keyStyle.Render("c") + descStyle.Render(" color"),
-		keyStyle.Render("g") + descStyle.Render(" new group"),
-		keyStyle.Render("G") + descStyle.Render(" assign group"),
-	}
-	b.WriteString("  " + strings.Join(featureKeys, "  "))
-	b.WriteString("\n\n")
-
-	// Row 4: Toggles & Split View
-	toggleKeys := []string{
-		keyStyle.Render("l") + descStyle.Render(" compact"),
-		keyStyle.Render("t") + descStyle.Render(" status"),
-		keyStyle.Render("I") + descStyle.Render(" icons"),
-		keyStyle.Render("v") + descStyle.Render(" split"),
-		keyStyle.Render("m") + descStyle.Render(" mark"),
-	}
-	b.WriteString("  " + strings.Join(toggleKeys, "  "))
-	b.WriteString("\n\n")
-
-	// Row 5: Projects
-	projectKeys := []string{
-		keyStyle.Render("P") + descStyle.Render(" projects"),
-		keyStyle.Render("i") + descStyle.Render(" import"),
-	}
-	b.WriteString("  " + strings.Join(projectKeys, "  "))
-	b.WriteString("\n\n")
-
-	// Row 6: Other
-	otherKeys := []string{
-		keyStyle.Render("?/F1") + descStyle.Render(" help"),
-		keyStyle.Render("q") + descStyle.Render(" quit"),
-		keyStyle.Render("R") + descStyle.Render(" resize"),
-		keyStyle.Render("U") + descStyle.Render(" update"),
-	}
-	b.WriteString("  " + strings.Join(otherKeys, "  "))
-	b.WriteString("\n\n")
-
-	// Detailed sections
-	b.WriteString(sectionStyle.Render("  📋 Detailed Descriptions"))
-	b.WriteString("\n")
-	b.WriteString(separatorStyle.Render("  " + strings.Repeat("─", 60)))
-	b.WriteString("\n\n")
-
-	details := []struct {
-		key  string
-		desc string
-	}{
-		{"↵ Enter", "Start session (if stopped) and attach to tmux session"},
-		{"n New", "Create a new agent session with project path"},
-		{"s Start", "Start session in background without attaching"},
-		{"a Replace/Start", "Replace current session OR start parallel session"},
-		{"r Resume", "Continue a previous session or start new"},
-		{"p Prompt", "Send a message to running session without attaching"},
-		{"N Notes", "Add/edit notes for the session (persists across resumes)"},
-		{"c Color", "Customize session with colors and gradients"},
-		{"g Group", "Create a new session group for organization"},
-		{"G Assign", "Assign selected session to a group"},
-		{"→ Right", "Expand a collapsed group"},
-		{"← Left", "Collapse an expanded group"},
-		{"l Compact", "Toggle compact view (less spacing between sessions)"},
-		{"t Status", "Toggle status line visibility under sessions"},
-		{"I Icons", "Toggle agent type icons in session list (Claude🤖 Gemini💎 etc.)"},
-		{"^Y Yolo", "Toggle auto-approve/yolo mode on selected session (restarts if running)"},
-		{"v Split", "Toggle split view to show two previews"},
-		{"m Mark", "Mark session for split view (pinned on top)"},
-		{"⇥ Tab", "Switch focus between split panels"},
-		{"U Update", "Download and install new version (if available)"},
-		{"P Projects", "Return to project selector"},
-		{"i Import", "Import sessions from default into current project"},
-		{"⇧↑/PgUp", "Scroll preview up"},
-		{"⇧↓/PgDn", "Scroll preview down"},
-		{"Home/End", "Jump to top/bottom of preview"},
-		{"Ctrl+↑/↓", "Move session up/down in list"},
+	// Helper for rendering key-description pairs
+	renderKey := func(key, desc string) string {
+		return keyStyle.Render(key) + " " + descStyle.Render(desc)
 	}
 
-	for _, d := range details {
-		b.WriteString("  " + headerStyle.Render(d.key) + " " + descStyle.Render(d.desc) + "\n")
+	// Column positions for alignment
+	const col2Start = 38 // Second column starts here
+
+	// Helper for two-column layout
+	renderRow := func(key1, desc1, key2, desc2 string) string {
+		left := renderKey(key1, desc1)
+		leftLen := lipgloss.Width(left)
+		padding := col2Start - leftLen
+		if padding < 2 {
+			padding = 2
+		}
+		return "  " + left + strings.Repeat(" ", padding) + renderKey(key2, desc2)
 	}
 
+	// ═══════════════════════════════════════════════════════════════════
+	// NAVIGATION
+	// ═══════════════════════════════════════════════════════════════════
+	b.WriteString(sectionStyle.Render("  Navigation"))
 	b.WriteString("\n")
-	b.WriteString(sectionStyle.Render("  🔗 In Attached Session"))
+	b.WriteString(separatorStyle.Render("  " + strings.Repeat("─", 65)))
 	b.WriteString("\n")
-	b.WriteString(separatorStyle.Render("  " + strings.Repeat("─", 60)))
+	b.WriteString(renderRow("↑/k ↓/j", "Move up/down", "Ctrl+↑/↓", "Reorder session"))
+	b.WriteString("\n")
+	b.WriteString(renderRow("Shift+↑/↓", "Scroll preview", "Home/End", "Preview top/bottom"))
 	b.WriteString("\n\n")
 
-	b.WriteString("  " + keyStyle.Render("Ctrl+q") + descStyle.Render(" Quick detach (resizes preview, works everywhere)") + "\n")
-	b.WriteString("  " + keyStyle.Render("Ctrl+b d") + descStyle.Render(" Standard tmux detach") + "\n")
-
+	// ═══════════════════════════════════════════════════════════════════
+	// SESSION ACTIONS
+	// ═══════════════════════════════════════════════════════════════════
+	b.WriteString(sectionStyle.Render("  Session Actions"))
 	b.WriteString("\n")
-	b.WriteString(sectionStyle.Render("  ℹ  About"))
+	b.WriteString(separatorStyle.Render("  " + strings.Repeat("─", 65)))
 	b.WriteString("\n")
-	b.WriteString(separatorStyle.Render("  " + strings.Repeat("─", 60)))
+	b.WriteString("  " + renderKey("Enter", "Attach (starts if stopped)"))
+	b.WriteString("\n")
+	b.WriteString(renderRow("n", "New session", "e", "Rename session"))
+	b.WriteString("\n")
+	b.WriteString(renderRow("s", "Start (background)", "a", "Replace/parallel start"))
+	b.WriteString("\n")
+	b.WriteString(renderRow("x", "Stop", "d", "Delete"))
+	b.WriteString("\n")
+	b.WriteString("  " + noteStyle.Render("     ↳ x/d asks session or tab when multiple tabs exist"))
+	b.WriteString("\n")
+	b.WriteString(renderRow("r", "Resume conversation", "p", "Send prompt"))
 	b.WriteString("\n\n")
 
-	b.WriteString(infoStyle.Render(fmt.Sprintf("  Agent Session Manager (%s) v%s", strings.ToUpper(AppName), AppVersion)))
+	// ═══════════════════════════════════════════════════════════════════
+	// TABS (Multiple windows per session)
+	// ═══════════════════════════════════════════════════════════════════
+	b.WriteString(sectionStyle.Render("  Tabs"))
 	b.WriteString("\n")
-	b.WriteString(infoStyle.Render("  Manage multiple AI coding agents"))
+	b.WriteString(separatorStyle.Render("  " + strings.Repeat("─", 65)))
 	b.WriteString("\n")
-	b.WriteString(infoStyle.Render("  Sessions stored in: ~/.config/agent-session-manager/"))
+	b.WriteString("  " + renderKey("t", "New tab (Agent or Terminal)"))
 	b.WriteString("\n")
-	b.WriteString(infoStyle.Render("  Built with Bubble Tea • github.com/izll/agent-session-manager"))
+	b.WriteString(renderRow("T", "Rename tab", "W", "Quick close tab"))
+	b.WriteString("\n")
+	b.WriteString(renderRow("[ ]", "Switch tabs", "Ctrl+F", "Toggle tracking"))
+	b.WriteString("\n")
+	b.WriteString("  " + noteStyle.Render("     ↳ Stopped tabs show ○ indicator, remain visible"))
+	b.WriteString("\n\n")
+
+	// ═══════════════════════════════════════════════════════════════════
+	// GROUPS
+	// ═══════════════════════════════════════════════════════════════════
+	b.WriteString(sectionStyle.Render("  Groups"))
+	b.WriteString("\n")
+	b.WriteString(separatorStyle.Render("  " + strings.Repeat("─", 65)))
+	b.WriteString("\n")
+	b.WriteString(renderRow("g", "Create group", "G", "Assign to group"))
+	b.WriteString("\n")
+	b.WriteString(renderRow("→", "Expand group", "←", "Collapse group"))
+	b.WriteString("\n\n")
+
+	// ═══════════════════════════════════════════════════════════════════
+	// CUSTOMIZATION
+	// ═══════════════════════════════════════════════════════════════════
+	b.WriteString(sectionStyle.Render("  Customization"))
+	b.WriteString("\n")
+	b.WriteString(separatorStyle.Render("  " + strings.Repeat("─", 65)))
+	b.WriteString("\n")
+	b.WriteString(renderRow("N", "Edit notes", "c", "Colors & gradients"))
+	b.WriteString("\n")
+	b.WriteString(renderRow("l", "Compact mode", "o", "Toggle status lines"))
+	b.WriteString("\n")
+	b.WriteString(renderRow("I", "Toggle icons", "^Y", "Toggle YOLO mode"))
+	b.WriteString("\n\n")
+
+	// ═══════════════════════════════════════════════════════════════════
+	// SPLIT VIEW
+	// ═══════════════════════════════════════════════════════════════════
+	b.WriteString(sectionStyle.Render("  Split View"))
+	b.WriteString("\n")
+	b.WriteString(separatorStyle.Render("  " + strings.Repeat("─", 65)))
+	b.WriteString("\n")
+	b.WriteString(renderRow("v", "Toggle split", "m", "Mark/pin session"))
+	b.WriteString("\n")
+	b.WriteString("  " + renderKey("Tab", "Switch focus between panes"))
+	b.WriteString("\n\n")
+
+	// ═══════════════════════════════════════════════════════════════════
+	// PROJECTS & OTHER
+	// ═══════════════════════════════════════════════════════════════════
+	b.WriteString(sectionStyle.Render("  Projects & Other"))
+	b.WriteString("\n")
+	b.WriteString(separatorStyle.Render("  " + strings.Repeat("─", 65)))
+	b.WriteString("\n")
+	b.WriteString(renderRow("P", "Project selector", "i", "Import sessions"))
+	b.WriteString("\n")
+	b.WriteString(renderRow("U", "Check updates", "R", "Force resize"))
+	b.WriteString("\n")
+	b.WriteString(renderRow("?", "Help", "q", "Quit"))
+	b.WriteString("\n\n")
+
+	// ═══════════════════════════════════════════════════════════════════
+	// ATTACHED SESSION
+	// ═══════════════════════════════════════════════════════════════════
+	b.WriteString(sectionStyle.Render("  Inside Attached Session"))
+	b.WriteString("\n")
+	b.WriteString(separatorStyle.Render("  " + strings.Repeat("─", 65)))
+	b.WriteString("\n")
+	b.WriteString("  " + renderKey("Ctrl+q", "Quick detach (auto-resizes preview)"))
+	b.WriteString("\n")
+	b.WriteString("  " + renderKey("Ctrl+b d", "Standard tmux detach"))
+	b.WriteString("\n\n")
+
+	// ═══════════════════════════════════════════════════════════════════
+	// STATUS INDICATORS
+	// ═══════════════════════════════════════════════════════════════════
+	b.WriteString(sectionStyle.Render("  Status Indicators"))
+	b.WriteString("\n")
+	b.WriteString(separatorStyle.Render("  " + strings.Repeat("─", 65)))
+	b.WriteString("\n")
+	b.WriteString("  " + activeStyle.Render("●") + descStyle.Render(" Busy (working)") + "    ")
+	b.WriteString(waitingStyle.Render("●") + descStyle.Render(" Waiting (needs input)"))
+	b.WriteString("\n")
+	b.WriteString("  " + idleStyle.Render("●") + descStyle.Render(" Idle (ready)") + "      ")
+	b.WriteString(stoppedStyle.Render("○") + descStyle.Render(" Stopped"))
+	b.WriteString("\n\n")
+
+	// ═══════════════════════════════════════════════════════════════════
+	// ABOUT
+	// ═══════════════════════════════════════════════════════════════════
+	b.WriteString(sectionStyle.Render("  About"))
+	b.WriteString("\n")
+	b.WriteString(separatorStyle.Render("  " + strings.Repeat("─", 65)))
+	b.WriteString("\n")
+	b.WriteString(infoStyle.Render(fmt.Sprintf("  %s v%s", strings.ToUpper(AppName), AppVersion)))
+	b.WriteString("\n")
+	b.WriteString(infoStyle.Render("  Manage multiple AI coding agents (Claude, Gemini, Aider, etc.)"))
+	b.WriteString("\n")
+	b.WriteString(infoStyle.Render("  github.com/izll/agent-session-manager"))
 	b.WriteString("\n\n")
 
 	// Get all content lines
@@ -191,7 +211,7 @@ func (m Model) helpView() string {
 	allLines := strings.Split(allContent, "\n")
 
 	// Calculate visible area
-	maxLines := m.height - 3 // -3 for footer and margins
+	maxLines := m.height - 3
 	if maxLines < 10 {
 		maxLines = 10
 	}
@@ -230,7 +250,7 @@ func (m Model) helpView() string {
 	}
 	footer := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(ColorGray)).
-		Render("Press ESC, ? or F1 to close" +
+		Render("Press ESC or ? to close" +
 			func() string {
 				if scrollInfo != "" {
 					return " • " + scrollInfo

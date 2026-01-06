@@ -17,6 +17,7 @@ var agentIcons = map[session.AgentType]string{
 	session.AgentAmazonQ:  "🦜",
 	session.AgentOpenCode: "💻",
 	session.AgentCustom:   "⚙️",
+	session.AgentTerminal: "🖥️",
 }
 
 // getAgentIcon returns the icon for an agent type
@@ -73,10 +74,10 @@ func (m Model) renderSessionRow(inst *session.Instance, index int, listWidth int
 	styledName := m.getStyledName(inst, name)
 	selected := index == m.cursor
 
-	// Append agent icon if enabled
+	// Append agent icon if enabled (but not if there are multiple agent tabs)
 	displayName := name
 	displayStyledName := styledName
-	if m.showAgentIcons {
+	if m.showAgentIcons && len(inst.FollowedWindows) == 0 {
 		icon := " " + getAgentIcon(inst.Agent)
 		displayName = name + icon
 		displayStyledName = styledName + icon
@@ -90,16 +91,62 @@ func (m Model) renderSessionRow(inst *session.Instance, index int, listWidth int
 	}
 	row.WriteString("\n")
 
-	// Show last output line (text white if selected, gray otherwise)
-	lastLine := m.getLastLine(inst)
-	lineStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorLightGray))
-	if selected {
-		textStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorWhite))
-		row.WriteString(lineStyle.Render("     └─ ") + textStyle.Render(lastLine))
-	} else {
-		row.WriteString(lineStyle.Render(fmt.Sprintf("     └─ %s", lastLine)))
+	// Show last output line(s) with activity-based coloring
+	if !m.hideStatusLines {
+		connectorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorLightGray))
+
+		// Filter out terminal windows for display
+		var displayWindows []session.FollowedWindow
+		for _, fw := range inst.FollowedWindows {
+			if fw.Agent != session.AgentTerminal {
+				displayWindows = append(displayWindows, fw)
+			}
+		}
+
+		// Determine tree connector based on whether there are more lines
+		hasMoreLines := len(displayWindows) > 0
+		mainConnector := "└─"
+		if hasMoreLines {
+			mainConnector = "├─"
+		}
+
+		// Get activity-based color for main window (0)
+		mainActivity := session.ActivityIdle
+		if winAct, ok := m.windowActivityState[inst.ID]; ok {
+			if act, ok := winAct[0]; ok {
+				mainActivity = act
+			}
+		}
+		mainTextStyle := m.getActivityTextStyle(mainActivity, selected)
+
+		// Main agent status (window 0)
+		lastLine := m.getLastLine(inst)
+		row.WriteString(connectorStyle.Render("     "+mainConnector+" ") + mainTextStyle.Render(lastLine))
+		row.WriteString("\n")
+
+		// Additional followed windows (excluding terminals)
+		for i, fw := range displayWindows {
+			fwLine := inst.GetLastLineForWindow(fw.Index, fw.Agent)
+			fwLine = m.truncateStatusLine(fwLine)
+
+			// Get activity-based color for this window
+			fwActivity := session.ActivityIdle
+			if winAct, ok := m.windowActivityState[inst.ID]; ok {
+				if act, ok := winAct[fw.Index]; ok {
+					fwActivity = act
+				}
+			}
+			fwTextStyle := m.getActivityTextStyle(fwActivity, selected)
+
+			// Last item gets └─, others get ├─
+			connector := "├─"
+			if i == len(displayWindows)-1 {
+				connector = "└─"
+			}
+			row.WriteString(connectorStyle.Render("     "+connector+" ") + fwTextStyle.Render(fwLine))
+			row.WriteString("\n")
+		}
 	}
-	row.WriteString("\n")
 
 	if !m.compactList {
 		row.WriteString("\n")
@@ -196,6 +243,32 @@ func (m Model) renderUnselectedRow(inst *session.Instance, name, styledName, sta
 		return fmt.Sprintf("   %s %s", status, rowStyle.Render(textPart))
 	}
 	return fmt.Sprintf("   %s %s", status, styledName)
+}
+
+// truncateStatusLine truncates a status line to fit the list pane
+func (m Model) truncateStatusLine(line string) string {
+	cleanLine := strings.TrimSpace(stripANSI(line))
+	if idx := strings.IndexAny(cleanLine, "\n\r"); idx >= 0 {
+		cleanLine = strings.TrimSpace(cleanLine[:idx])
+	}
+	maxLen := ListPaneWidth - 14
+	if maxLen < 10 {
+		maxLen = 10
+	}
+	return truncateRunes(cleanLine, maxLen)
+}
+
+// getActivityTextStyle returns text style based on activity state
+func (m Model) getActivityTextStyle(activity session.SessionActivity, selected bool) lipgloss.Style {
+	switch activity {
+	case session.ActivityBusy:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(ColorOrange))
+	case session.ActivityWaiting:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(ColorCyan))
+	default:
+		// Idle - light gray
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(ColorLightGray))
+	}
 }
 
 // getLastLine returns the last line of output for a session
@@ -482,10 +555,10 @@ func (m Model) renderGroupedSessionRow(inst *session.Instance, index int, listWi
 	styledName := m.getStyledName(inst, name)
 	selected := index == m.cursor
 
-	// Append agent icon if enabled
+	// Append agent icon if enabled (but not if there are multiple agent tabs)
 	displayName := name
 	displayStyledName := styledName
-	if m.showAgentIcons {
+	if m.showAgentIcons && len(inst.FollowedWindows) == 0 {
 		icon := " " + getAgentIcon(inst.Agent)
 		displayName = name + icon
 		displayStyledName = styledName + icon
@@ -507,17 +580,61 @@ func (m Model) renderGroupedSessionRow(inst *session.Instance, index int, listWi
 	}
 	row.WriteString("\n")
 
-	// Show last output line with tree connector (text white if selected, gray otherwise)
+	// Show last output line(s) with tree connector and activity-based coloring
 	if !m.hideStatusLines {
-		lastLine := m.getLastLine(inst)
-		lineStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorLightGray))
-		if selected {
-			textStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorWhite))
-			row.WriteString(lineStyle.Render(fmt.Sprintf(" %s  └─ ", lastLinePrefix)) + textStyle.Render(lastLine))
-		} else {
-			row.WriteString(lineStyle.Render(fmt.Sprintf(" %s  └─ %s", lastLinePrefix, lastLine)))
+		connectorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorLightGray))
+
+		// Filter out terminal windows for display
+		var displayWindows []session.FollowedWindow
+		for _, fw := range inst.FollowedWindows {
+			if fw.Agent != session.AgentTerminal {
+				displayWindows = append(displayWindows, fw)
+			}
 		}
+
+		// Determine tree connector based on whether there are more lines
+		hasMoreLines := len(displayWindows) > 0
+		mainConnector := "└─"
+		if hasMoreLines {
+			mainConnector = "├─"
+		}
+
+		// Get activity-based color for main window (0)
+		mainActivity := session.ActivityIdle
+		if winAct, ok := m.windowActivityState[inst.ID]; ok {
+			if act, ok := winAct[0]; ok {
+				mainActivity = act
+			}
+		}
+		mainTextStyle := m.getActivityTextStyle(mainActivity, selected)
+
+		// Main agent status (window 0)
+		lastLine := m.getLastLine(inst)
+		row.WriteString(connectorStyle.Render(fmt.Sprintf(" %s  %s ", lastLinePrefix, mainConnector)) + mainTextStyle.Render(lastLine))
 		row.WriteString("\n")
+
+		// Additional followed windows (excluding terminals)
+		for i, fw := range displayWindows {
+			fwLine := inst.GetLastLineForWindow(fw.Index, fw.Agent)
+			fwLine = m.truncateStatusLine(fwLine)
+
+			// Get activity-based color for this window
+			fwActivity := session.ActivityIdle
+			if winAct, ok := m.windowActivityState[inst.ID]; ok {
+				if act, ok := winAct[fw.Index]; ok {
+					fwActivity = act
+				}
+			}
+			fwTextStyle := m.getActivityTextStyle(fwActivity, selected)
+
+			// Last item gets └─, others get ├─
+			connector := "├─"
+			if i == len(displayWindows)-1 {
+				connector = "└─"
+			}
+			row.WriteString(connectorStyle.Render(fmt.Sprintf(" %s  %s ", lastLinePrefix, connector)) + fwTextStyle.Render(fwLine))
+			row.WriteString("\n")
+		}
 	}
 
 	// Add empty row spacing when not in compact mode

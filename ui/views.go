@@ -33,6 +33,8 @@ func (m Model) View() string {
 		return m.helpView()
 	case stateConfirmDelete:
 		return m.confirmDeleteView()
+	case stateConfirmStop:
+		return m.confirmStopView()
 	case stateSelectStartMode:
 		return m.selectStartModeView()
 	case stateConfirmStart:
@@ -69,6 +71,22 @@ func (m Model) View() string {
 		return m.updateSuccessView()
 	case stateNotes:
 		return m.notesView()
+	case stateNewTabChoice:
+		return m.newTabChoiceView()
+	case stateNewTabAgent:
+		return m.newTabAgentView()
+	case stateNewTab:
+		return m.newTabView()
+	case stateRenameTab:
+		return m.renameTabView()
+	case stateDeleteChoice:
+		return m.deleteChoiceView()
+	case stateConfirmDeleteTab:
+		return m.confirmDeleteTabView()
+	case stateStopChoice:
+		return m.stopChoiceView()
+	case stateConfirmStopTab:
+		return m.confirmStopTabView()
 	default:
 		return m.listView()
 	}

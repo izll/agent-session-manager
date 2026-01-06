@@ -86,7 +86,7 @@ func (m Model) buildStatusBar() string {
 	}
 	p5 := []string{
 		keyStyle.Render("l") + descStyle.Render(" compact ") + compactStatus,
-		keyStyle.Render("t") + descStyle.Render(" status ") + statusLinesStatus,
+		keyStyle.Render("o") + descStyle.Render(" output ") + statusLinesStatus,
 		keyStyle.Render("I") + descStyle.Render(" icons ") + iconsStatus,
 		keyStyle.Render("^Y") + descStyle.Render(" yolo ") + autoYesStatus,
 		keyStyle.Render("v") + descStyle.Render(" split ") + splitStatus,
