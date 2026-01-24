@@ -531,21 +531,23 @@ func (m Model) handleListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "r":
-		// Resume only works for agents that support it
-		if inst := m.getSelectedInstance(); inst != nil {
-			config := inst.GetAgentConfig()
-			if !config.SupportsResume {
-				m.err = fmt.Errorf("resume not supported for %s agent", inst.Agent)
-				m.previousState = m.state // Save current state to return after error
-				m.state = stateError
-				return m, nil
-			}
+		// Resume: launch agent's native resume picker
+		inst := m.getSelectedInstance()
+		if inst == nil {
+			return m, nil
 		}
-		if err := m.handleResumeSession(); err != nil {
-			m.err = err
-			m.previousState = m.state // Save current state to return after error
+		config := inst.GetAgentConfig()
+		if !config.SupportsResume {
+			m.err = fmt.Errorf("resume not supported for %s agent", inst.Agent)
+			m.previousState = m.state
 			m.state = stateError
+			return m, nil
 		}
+		// Show choice dialog: new tab or replace
+		m.resumeTarget = inst
+		m.resumeChoiceCursor = 0 // Default to new tab
+		m.state = stateResumeChoice
+		return m, nil
 
 	case "s":
 		m.handleStartSession()
@@ -669,12 +671,8 @@ func (m Model) handleListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// Pre-fill with current tab name
 			defaultName := inst.Name
 			if inst.Status == session.StatusRunning {
-				windows := inst.GetWindowList()
-				for _, w := range windows {
-					if w.Active {
-						defaultName = w.Name
-						break
-					}
+				if name := inst.GetCurrentWindowName(); name != "" {
+					defaultName = name
 				}
 			}
 			m.forkNameInput.SetValue(defaultName)
@@ -723,14 +721,14 @@ func (m Model) handleListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if inst.Status == session.StatusRunning {
 				windows := inst.GetWindowList()
 				if len(windows) > 1 {
-					for _, w := range windows {
-						if w.Active {
-							m.nameInput.SetValue(w.Name)
-							m.nameInput.CursorEnd()
-							m.nameInput.Focus()
-							break
-						}
+					// Get current window name directly from tmux
+					if name := inst.GetCurrentWindowName(); name != "" {
+						m.nameInput.SetValue(name)
+					} else {
+						m.nameInput.SetValue("")
 					}
+					m.nameInput.CursorEnd()
+					m.nameInput.Focus()
 					m.state = stateRenameTab
 					return m, textinput.Blink
 				}
@@ -741,20 +739,18 @@ func (m Model) handleListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Close current tmux tab/window (not window 0)
 		if inst := m.getSelectedInstance(); inst != nil {
 			if inst.Status == session.StatusRunning {
-				windows := inst.GetWindowList()
-				for _, w := range windows {
-					if w.Active && w.Index != 0 {
-						if err := inst.CloseWindow(w.Index); err != nil {
-							m.err = err
-							m.previousState = stateList
-							m.state = stateError
-							return m, nil
-						}
-						// Refresh status bar (may hide tabs if only 1 window left)
-						configureTmuxStatusBar(inst.TmuxSessionName(), inst.Name, inst.Color, inst.BgColor, inst.AutoYes)
-						m.storage.UpdateInstance(inst)
-						break
+				// Get current active window index from tmux
+				currentIdx := inst.GetCurrentWindowIndex()
+				if currentIdx > 0 { // Can't close main agent window (index 0)
+					if err := inst.CloseWindow(currentIdx); err != nil {
+						m.err = err
+						m.previousState = stateList
+						m.state = stateError
+						return m, nil
 					}
+					// Refresh status bar (may hide tabs if only 1 window left)
+					configureTmuxStatusBar(inst.TmuxSessionName(), inst.Name, inst.Color, inst.BgColor, inst.AutoYes)
+					m.storage.UpdateInstance(inst)
 				}
 			}
 		}

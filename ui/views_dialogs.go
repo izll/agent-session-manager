@@ -624,8 +624,8 @@ func (m Model) deleteChoiceView() string {
 	boxContent.WriteString("  " + keyStyle.Render("s") + " Session - Delete entire session\n")
 	boxContent.WriteString(dimStyle.Render("            (stops and removes all tabs)"))
 	boxContent.WriteString("\n\n")
-	boxContent.WriteString("  " + keyStyle.Render("t") + " Tab     - Close current tab only\n")
-	boxContent.WriteString(dimStyle.Render("            (main agent tab cannot be closed)"))
+	boxContent.WriteString("  " + keyStyle.Render("t") + " Tab     - Delete current tab only\n")
+	boxContent.WriteString(dimStyle.Render("            (main agent tab cannot be deleted)"))
 	boxContent.WriteString("\n\n")
 	boxContent.WriteString(helpStyle.Render("  esc: cancel"))
 	boxContent.WriteString("\n")
@@ -670,7 +670,7 @@ func (m Model) stopChoiceView() string {
 	boxContent.WriteString(dimStyle.Render("            (kills all tabs)"))
 	boxContent.WriteString("\n\n")
 	boxContent.WriteString("  " + keyStyle.Render("t") + " Tab     - Stop current tab only\n")
-	boxContent.WriteString(dimStyle.Render("            (sends Ctrl+C/D to tab)"))
+	boxContent.WriteString(dimStyle.Render("            (sends Ctrl+C to tab)"))
 	boxContent.WriteString("\n\n")
 	boxContent.WriteString(helpStyle.Render("  esc: cancel"))
 	boxContent.WriteString("\n")
@@ -695,6 +695,37 @@ func (m Model) confirmStopTabView() string {
 	boxContent.WriteString("\n")
 
 	return m.renderOverlayDialog(" Confirm Stop Tab ", boxContent.String(), 45, "#FFA500")
+}
+
+// resumeTabChoiceView renders the resume stopped tab selection dialog
+func (m Model) resumeTabChoiceView() string {
+	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
+	selectedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorCyan)).Bold(true)
+	normalStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorLightGray))
+
+	var boxContent strings.Builder
+	boxContent.WriteString("\n")
+	boxContent.WriteString("  Select stopped tab to resume:\n\n")
+
+	for i, tab := range m.resumeTabStoppedTabs {
+		prefix := "  "
+		style := normalStyle
+		if i == m.resumeTabCursor {
+			prefix = "▸ "
+			style = selectedStyle
+		}
+		agentName := string(tab.Agent)
+		if agentName == "" {
+			agentName = "claude"
+		}
+		boxContent.WriteString(fmt.Sprintf("  %s%s\n", prefix, style.Render(fmt.Sprintf("%s (%s)", tab.Name, agentName))))
+	}
+
+	boxContent.WriteString("\n")
+	boxContent.WriteString(helpStyle.Render("  ↑/↓: select  enter: resume  esc: cancel"))
+	boxContent.WriteString("\n")
+
+	return m.renderOverlayDialog(" Resume Stopped Tab ", boxContent.String(), 50, "#00AA00")
 }
 
 // confirmYoloView renders the YOLO mode confirmation dialog
@@ -731,4 +762,128 @@ func (m Model) confirmYoloView() string {
 	boxContent.WriteString("\n")
 
 	return m.renderOverlayDialog(" Confirm YOLO ", boxContent.String(), 45, "#FFA500")
+}
+
+// resumeChoiceView renders the resume choice dialog (new tab vs replace)
+func (m Model) resumeChoiceView() string {
+	var boxContent strings.Builder
+	boxContent.WriteString("\n\n")
+
+	inst := m.resumeTarget
+	if inst != nil {
+		boxContent.WriteString(fmt.Sprintf("  Resume picker for '%s'\n\n", inst.Name))
+	}
+
+	boxContent.WriteString("  Open in:\n\n")
+
+	// New tab option
+	if m.resumeChoiceCursor == 0 {
+		boxContent.WriteString("  ❯ New Tab\n")
+		boxContent.WriteString(dimStyle.Render("      Open resume picker in new tab"))
+		boxContent.WriteString("\n\n")
+	} else {
+		boxContent.WriteString("    New Tab\n")
+		boxContent.WriteString(dimStyle.Render("      Open resume picker in new tab"))
+		boxContent.WriteString("\n\n")
+	}
+
+	// Replace option
+	if m.resumeChoiceCursor == 1 {
+		boxContent.WriteString("  ❯ Replace Current\n")
+		if inst != nil && inst.Status == session.StatusRunning {
+			boxContent.WriteString(dimStyle.Render("      Stop session and open picker"))
+		} else {
+			boxContent.WriteString(dimStyle.Render("      Start with resume picker"))
+		}
+		boxContent.WriteString("\n\n")
+	} else {
+		boxContent.WriteString("    Replace Current\n")
+		if inst != nil && inst.Status == session.StatusRunning {
+			boxContent.WriteString(dimStyle.Render("      Stop session and open picker"))
+		} else {
+			boxContent.WriteString(dimStyle.Render("      Start with resume picker"))
+		}
+		boxContent.WriteString("\n\n")
+	}
+
+	boxContent.WriteString(helpStyle.Render("  enter: select  t/1: tab  r/2: replace  esc: cancel"))
+	boxContent.WriteString("\n")
+
+	return m.renderOverlayDialog(" Resume Session ", boxContent.String(), 50, "#87D7FF")
+}
+
+// newSessionChoiceView renders the new session choice dialog (new vs continue)
+func (m Model) newSessionChoiceView() string {
+	var boxContent strings.Builder
+	boxContent.WriteString("\n\n")
+
+	inst := m.pendingInstance
+	if inst != nil {
+		boxContent.WriteString(fmt.Sprintf("  Session: '%s'\n\n", inst.Name))
+	}
+
+	// New session option
+	if m.newSessionChoiceCursor == 0 {
+		boxContent.WriteString("  ❯ New Session\n")
+		boxContent.WriteString(dimStyle.Render("      Start fresh conversation"))
+		boxContent.WriteString("\n\n")
+	} else {
+		boxContent.WriteString("    New Session\n")
+		boxContent.WriteString(dimStyle.Render("      Start fresh conversation"))
+		boxContent.WriteString("\n\n")
+	}
+
+	// Continue existing option
+	if m.newSessionChoiceCursor == 1 {
+		boxContent.WriteString("  ❯ Continue Existing\n")
+		boxContent.WriteString(dimStyle.Render("      Resume from session picker"))
+		boxContent.WriteString("\n\n")
+	} else {
+		boxContent.WriteString("    Continue Existing\n")
+		boxContent.WriteString(dimStyle.Render("      Resume from session picker"))
+		boxContent.WriteString("\n\n")
+	}
+
+	boxContent.WriteString(helpStyle.Render("  enter: select  n/1: new  c/2: continue  esc: cancel"))
+	boxContent.WriteString("\n")
+
+	return m.renderOverlayDialog(" New Session ", boxContent.String(), 50, "#87D7FF")
+}
+
+// newTabSessionChoiceView renders the new tab session choice dialog (new vs continue existing)
+func (m Model) newTabSessionChoiceView() string {
+	var boxContent strings.Builder
+	boxContent.WriteString("\n\n")
+
+	inst := m.getSelectedInstance()
+	if inst != nil {
+		boxContent.WriteString(fmt.Sprintf("  New Claude Tab in '%s'\n\n", inst.Name))
+	}
+
+	// New session option
+	if m.newTabSessionChoiceCursor == 0 {
+		boxContent.WriteString("  ❯ New Session\n")
+		boxContent.WriteString(dimStyle.Render("      Start fresh conversation"))
+		boxContent.WriteString("\n\n")
+	} else {
+		boxContent.WriteString("    New Session\n")
+		boxContent.WriteString(dimStyle.Render("      Start fresh conversation"))
+		boxContent.WriteString("\n\n")
+	}
+
+	// Continue existing option
+	if m.newTabSessionChoiceCursor == 1 {
+		boxContent.WriteString("  ❯ Continue Existing\n")
+		boxContent.WriteString(dimStyle.Render("      Resume from session picker"))
+		boxContent.WriteString("\n\n")
+	} else {
+		boxContent.WriteString("    Continue Existing\n")
+		boxContent.WriteString(dimStyle.Render("      Resume from session picker"))
+		boxContent.WriteString("\n\n")
+	}
+
+	boxContent.WriteString(helpStyle.Render("  enter: select  n/1: new  c/2: continue  esc: cancel"))
+	boxContent.WriteString("\n")
+
+	return m.renderOverlayDialog(" New Claude Tab ", boxContent.String(), 50, "#87D7FF")
 }

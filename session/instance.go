@@ -153,6 +153,7 @@ type FollowedWindow struct {
 	AutoYes         bool      `json:"auto_yes"`          // YOLO mode for this tab
 	ResumeSessionID string    `json:"resume_session_id"` // Resume session ID for this tab
 	Notes           string    `json:"notes,omitempty"`   // User notes for this tab
+	Stopped         bool      `json:"stopped,omitempty"` // Tab is stopped (window killed but can resume)
 }
 
 // GetAgentConfig returns the agent configuration for this instance
@@ -380,14 +381,14 @@ func (i *Instance) StartWithResume(resumeID string) error {
 		// Set terminal overrides for better key support
 		exec.Command("tmux", "set-option", "-t", sessionName, "-ga", "terminal-overrides", ",xterm*:smcup@:rmcup@").Run()
 
-		// Bind Shift+PageUp/Down for scrolling in copy mode
-		exec.Command("tmux", "bind-key", "-T", "root", "S-PageUp", "copy-mode", "-eu").Run()
-		exec.Command("tmux", "bind-key", "-T", "root", "S-PageDown", "send-keys", "PageDown").Run()
-		exec.Command("tmux", "bind-key", "-T", "copy-mode-vi", "S-PageUp", "send-keys", "-X", "page-up").Run()
-		exec.Command("tmux", "bind-key", "-T", "copy-mode-vi", "S-PageDown", "send-keys", "-X", "page-down").Run()
+		// Bind Shift+PageUp/Down for scrolling in copy mode (session-specific)
+		exec.Command("tmux", "bind-key", "-t", sessionName, "-T", "root", "S-PageUp", "copy-mode", "-eu").Run()
+		exec.Command("tmux", "bind-key", "-t", sessionName, "-T", "root", "S-PageDown", "send-keys", "PageDown").Run()
+		exec.Command("tmux", "bind-key", "-t", sessionName, "-T", "copy-mode-vi", "S-PageUp", "send-keys", "-X", "page-up").Run()
+		exec.Command("tmux", "bind-key", "-t", sessionName, "-T", "copy-mode-vi", "S-PageDown", "send-keys", "-X", "page-down").Run()
 
-		// Bind Ctrl+Y for yolo mode toggle (passes both session name and window index)
-		exec.Command("tmux", "bind-key", "-n", "C-y", "run-shell", `asmgr yolo "$(tmux display-message -p '#{session_name}')" "$(tmux display-message -p '#{window_index}')" 2>/dev/null`).Run()
+		// Bind Ctrl+Y for yolo mode toggle (session-specific, passes both session name and window index)
+		exec.Command("tmux", "bind-key", "-t", sessionName, "-n", "C-y", "run-shell", `asmgr yolo "$(tmux display-message -p '#{session_name}')" "$(tmux display-message -p '#{window_index}')" 2>/dev/null`).Run()
 
 		// Ctrl+q will be set up with resize in UpdateDetachBinding
 
@@ -693,7 +694,8 @@ func (i *Instance) RespawnWindowWithResume(windowIdx int, resumeID string) error
 	return exec.Command("tmux", "respawn-pane", "-k", "-t", target).Run()
 }
 
-// StopWindow kills the process in a tmux window (keeps window due to remain-on-exit)
+// StopWindow stops the agent in a tmux window by sending Ctrl+C twice
+// The window stays open so user can switch to it and respawn with Enter
 func (i *Instance) StopWindow(windowIdx int) error {
 	if i.Status != StatusRunning {
 		return fmt.Errorf("instance not running")
@@ -702,14 +704,93 @@ func (i *Instance) StopWindow(windowIdx int) error {
 	sessionName := i.TmuxSessionName()
 	target := fmt.Sprintf("%s:%d", sessionName, windowIdx)
 
-	// Send Ctrl+C to interrupt the process gracefully
+	// Send Ctrl+C twice to stop the agent (Claude needs 2x)
+	exec.Command("tmux", "send-keys", "-t", target, "C-c").Run()
+	time.Sleep(100 * time.Millisecond)
 	exec.Command("tmux", "send-keys", "-t", target, "C-c").Run()
 
-	// Wait briefly then send Ctrl+D (EOF) to terminate shell if it's still running
-	time.Sleep(100 * time.Millisecond)
-	exec.Command("tmux", "send-keys", "-t", target, "C-d").Run()
-
 	return nil
+}
+
+// ResumeStoppedTab resumes a stopped tab by creating a new window and starting the agent
+func (i *Instance) ResumeStoppedTab(fwIndex int) (int, error) {
+	if i.Status != StatusRunning {
+		return 0, fmt.Errorf("instance not running")
+	}
+
+	// Find the stopped FollowedWindow
+	var fw *FollowedWindow
+	var fwIdx int
+	for idx := range i.FollowedWindows {
+		if i.FollowedWindows[idx].Index == fwIndex && i.FollowedWindows[idx].Stopped {
+			fw = &i.FollowedWindows[idx]
+			fwIdx = idx
+			break
+		}
+	}
+	if fw == nil {
+		return 0, fmt.Errorf("stopped tab not found")
+	}
+
+	sessionName := i.TmuxSessionName()
+
+	// Create a new tmux window with the tab name
+	cmd := exec.Command("tmux", "new-window", "-t", sessionName, "-c", i.Path, "-n", fw.Name, "-P", "-F", "#{window_index}")
+	output, err := cmd.Output()
+	if err != nil {
+		return 0, fmt.Errorf("failed to create window: %w", err)
+	}
+
+	// Parse the new window index
+	newIdx := 0
+	fmt.Sscanf(strings.TrimSpace(string(output)), "%d", &newIdx)
+
+	// Build the command to run
+	agentCmd := i.buildAgentCommand(fw.Agent, fw.CustomCommand, fw.AutoYes, fw.ResumeSessionID)
+
+	// Send the command to the new window
+	target := fmt.Sprintf("%s:%d", sessionName, newIdx)
+	exec.Command("tmux", "send-keys", "-t", target, agentCmd, "Enter").Run()
+
+	// Update the FollowedWindow
+	i.FollowedWindows[fwIdx].Index = newIdx
+	i.FollowedWindows[fwIdx].Stopped = false
+
+	return newIdx, nil
+}
+
+// buildAgentCommand builds the command string to run an agent
+func (i *Instance) buildAgentCommand(agent AgentType, customCmd string, autoYes bool, resumeID string) string {
+	if agent == AgentCustom && customCmd != "" {
+		return customCmd
+	}
+
+	if agent == AgentTerminal {
+		return "" // Terminal just opens a shell
+	}
+
+	config, ok := AgentConfigs[agent]
+	if !ok {
+		config = AgentConfigs[AgentClaude] // Default to Claude
+	}
+
+	cmd := config.Command
+
+	// Add resume flag if applicable
+	if resumeID != "" && config.SupportsResume {
+		if config.ResumeIsSubcommand {
+			cmd = cmd + " " + config.ResumeFlag + " " + resumeID
+		} else {
+			cmd = cmd + " " + config.ResumeFlag + " " + resumeID
+		}
+	}
+
+	// Add auto-yes flag if applicable
+	if autoYes && config.SupportsAutoYes {
+		cmd = cmd + " " + config.AutoYesFlag
+	}
+
+	return cmd
 }
 
 // CloseWindow closes a tmux window by index and removes it from FollowedWindows
@@ -780,6 +861,22 @@ func (i *Instance) GetCurrentWindowIndex() int {
 	var idx int
 	fmt.Sscanf(strings.TrimSpace(string(output)), "%d", &idx)
 	return idx
+}
+
+// GetCurrentWindowName returns the name of the currently active window
+func (i *Instance) GetCurrentWindowName() string {
+	if i.Status != StatusRunning {
+		return ""
+	}
+
+	sessionName := i.TmuxSessionName()
+	cmd := exec.Command("tmux", "display-message", "-t", sessionName, "-p", "#{window_name}")
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+
+	return strings.TrimSpace(string(output))
 }
 
 // SelectWindow switches to the specified window index
@@ -1112,7 +1209,7 @@ if echo "$SESSION" | grep -q '^asm_'; then
 fi
 tmux detach-client
 `, sessionName, previewWidth, previewHeight)
-	exec.Command("tmux", "bind-key", "-n", "C-q", "run-shell", shellScript).Run()
+	exec.Command("tmux", "bind-key", "-t", sessionName, "-n", "C-q", "run-shell", shellScript).Run()
 }
 
 

@@ -34,7 +34,7 @@ type historyLoadedMsg struct {
 // Version info
 const (
 	AppName    = "asmgr"
-	AppVersion = "0.7.5"
+	AppVersion = "0.7.6"
 )
 
 // Layout constants
@@ -97,11 +97,12 @@ const (
 	stateNewTabChoice   // Choosing between Agent or Terminal tab
 	stateNewTabAgent    // Selecting agent type for new tab
 	stateNewTab         // Creating new tmux tab/window with name
-	stateRenameTab      // Renaming tmux tab/window
+	stateRenameTab        // Renaming tmux tab/window
 	stateDeleteChoice     // Choosing between deleting session or tab
 	stateConfirmDeleteTab // Confirming tab deletion
 	stateStopChoice       // Choosing between stopping session or tab
 	stateConfirmStopTab   // Confirming tab stop
+	stateResumeTabChoice  // Choosing which stopped tab to resume
 	stateConfirmYolo      // Confirming YOLO mode toggle
 	stateSearch              // Searching/filtering sessions
 	stateGlobalSearchLoading // Loading history for global search
@@ -111,6 +112,9 @@ const (
 	stateGlobalSearchConfirmJump // Confirm jump to existing session
 	stateGlobalSearchNewName     // Entering name for new session from global search
 	stateGlobalSearchSelectMatch // Selecting from multiple matching sessions/tabs
+	stateResumeChoice            // Choose between new tab or replace for resume
+	stateNewSessionChoice        // Choose between new session or continue existing
+	stateNewTabSessionChoice     // Choose between new session or continue existing for new tab
 )
 
 // Model represents the main TUI application state for Agent Session Manager.
@@ -140,6 +144,8 @@ type Model struct {
 	resumeAgentType     session.AgentType         // Agent type for resume (active tab's agent)
 	resumeWindowIndex   int                       // Window index for resume (active tab's index)
 	sessionCursor       int                       // Cursor for Claude session selection
+	sessionGroupExpanded map[string]bool          // Tracks which project groups are expanded
+	sessionGroupedView  []sessionGroupItem        // Flattened list of groups and sessions for display
 	pendingInstance     *session.Instance         // Instance being created
 	isParallelSession   bool                      // True if creating parallel session (don't show resume)
 	parallelOriginalID  string                    // Original instance ID when creating parallel session
@@ -222,6 +228,27 @@ type Model struct {
 	globalSearchMatchedTabIndex int                              // Matched tab index (-1 = main session, >=0 = tab index)
 	globalSearchMatches         []globalSearchMatch              // All matching sessions/tabs for selection
 	globalSearchMatchCursor     int                              // Cursor for match selection
+
+	// Resume sync flag
+	pendingResumeSync    bool      // True when 'r' was pressed, triggers session ID sync on detach
+	resumeSyncTime       time.Time // Time when 'r' was pressed
+	resumeSyncWindowIdx  int       // Window index to sync (0 = main, >0 = tab index in FollowedWindows)
+
+	// Resume choice dialog
+	resumeTarget       *session.Instance // Target instance for resume
+	resumeChoiceCursor int               // 0 = new tab, 1 = replace
+
+	// New session choice dialog
+	newSessionChoiceCursor int // 0 = new session, 1 = continue existing
+
+	// New tab session choice dialog (for Claude tabs)
+	newTabSessionChoiceCursor int  // 0 = new session, 1 = continue existing
+	newTabContinueExisting    bool // true = use resume picker after name input
+
+	// Resume stopped tab
+	resumeTabTarget       *session.Instance       // Target instance for resume tab
+	resumeTabStoppedTabs  []session.FollowedWindow // List of stopped tabs
+	resumeTabCursor       int                      // Cursor for selecting stopped tab
 }
 
 // globalSearchMatch represents a matched session/tab for selection
@@ -236,6 +263,15 @@ type visibleItem struct {
 	isGroup  bool              // true if this is a group header
 	group    *session.Group    // The group (if isGroup is true)
 	instance *session.Instance // The session instance (if isGroup is false)
+}
+
+// sessionGroupItem represents an item in the session selector grouped view
+type sessionGroupItem struct {
+	isGroupHeader bool                  // true if this is a project group header
+	projectPath   string                // Project path (for group header)
+	projectName   string                // Short display name for the project
+	sessionCount  int                   // Number of sessions in this group (for header)
+	session       *session.AgentSession // The session (if not group header)
 }
 
 // tickMsg is sent periodically to update the UI
@@ -265,10 +301,12 @@ func NewModel() (Model, error) {
 	nameInput := textinput.New()
 	nameInput.Placeholder = "Session name"
 	nameInput.CharLimit = 50
+	nameInput.Width = 40
 
 	pathInput := textinput.New()
 	pathInput.Placeholder = "/path/to/project"
 	pathInput.CharLimit = 256
+	pathInput.Width = 50
 
 	promptInput := textarea.New()
 	promptInput.Placeholder = "Enter message to send..."
@@ -478,6 +516,47 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case reattachMsg:
+		// Sync session ID after returning from Claude
+		if m.pendingResumeSync {
+			if inst := m.getSelectedInstance(); inst != nil {
+				checkTime := m.resumeSyncTime.Add(-5 * time.Second)
+				// Try multiple methods to find the active session ID
+				// 1. Debug logs (most reliable - captures SessionStart even without interaction)
+				newID := session.GetActiveSessionFromDebugLogs(inst.Path, checkTime)
+				// 2. Fallback to history.jsonl (only updated when user sends message)
+				if newID == "" {
+					newID = session.GetActiveSessionIDFromHistory(inst.Path, checkTime)
+				}
+				// 3. Fallback to latest modified session file
+				if newID == "" {
+					newID = session.GetLatestModifiedSessionID(inst.Path, checkTime)
+				}
+
+				if newID != "" {
+					if m.resumeSyncWindowIdx == 0 {
+						// Sync main session
+						if (inst.Agent == session.AgentClaude || inst.Agent == "") && newID != inst.ResumeSessionID {
+							inst.ResumeSessionID = newID
+							m.storage.UpdateInstance(inst)
+						}
+					} else {
+						// Sync tab (FollowedWindow)
+						for i := range inst.FollowedWindows {
+							if inst.FollowedWindows[i].Index == m.resumeSyncWindowIdx {
+								if inst.FollowedWindows[i].ResumeSessionID != newID {
+									inst.FollowedWindows[i].ResumeSessionID = newID
+									m.storage.UpdateInstance(inst)
+								}
+								break
+							}
+						}
+					}
+				}
+			}
+			m.pendingResumeSync = false
+			m.resumeSyncTime = time.Time{}
+			m.resumeSyncWindowIdx = 0
+		}
 		// Request window size to refresh dimensions after reattach
 		return m, tea.Batch(tea.ClearScreen, tea.EnableMouseCellMotion, tea.WindowSize())
 
@@ -662,6 +741,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleStopChoiceKeys(msg)
 		case stateConfirmStopTab:
 			return m.handleConfirmStopTabKeys(msg)
+		case stateResumeTabChoice:
+			return m.handleResumeTabChoiceKeys(msg)
 		case stateConfirmYolo:
 			return m.handleConfirmYoloKeys(msg)
 		case stateSearch:
@@ -685,6 +766,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleGlobalSearchNewNameKeys(msg)
 		case stateGlobalSearchSelectMatch:
 			return m.handleGlobalSearchSelectMatchKeys(msg)
+		case stateResumeChoice:
+			return m.handleResumeChoiceKeys(msg)
+		case stateNewSessionChoice:
+			return m.handleNewSessionChoiceKeys(msg)
+		case stateNewTabSessionChoice:
+			return m.handleNewTabSessionChoiceKeys(msg)
 		}
 	}
 

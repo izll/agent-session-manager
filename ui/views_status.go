@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/izll/agent-session-manager/session"
 )
 
 // buildStatusBar builds the status bar at the bottom
@@ -154,6 +155,76 @@ func (m Model) buildStatusBar() string {
 	return "\n" + lipgloss.PlaceHorizontal(m.width, lipgloss.Center, statusText)
 }
 
+// buildSessionGroupedView builds the flattened grouped view from agentSessions
+func (m *Model) buildSessionGroupedView() {
+	m.sessionGroupedView = nil
+
+	if len(m.agentSessions) == 0 {
+		return
+	}
+
+	// Initialize expanded map if nil
+	if m.sessionGroupExpanded == nil {
+		m.sessionGroupExpanded = make(map[string]bool)
+	}
+
+	// Group sessions by project path
+	type projectGroup struct {
+		path     string
+		name     string
+		sessions []session.AgentSession
+	}
+	groups := make(map[string]*projectGroup)
+	var groupOrder []string
+
+	for _, s := range m.agentSessions {
+		path := s.ProjectPath
+		if path == "" {
+			path = "(unknown)"
+		}
+
+		if _, exists := groups[path]; !exists {
+			// Extract short name from path
+			name := path
+			parts := strings.Split(path, "/")
+			if len(parts) > 0 {
+				name = parts[len(parts)-1]
+			}
+			groups[path] = &projectGroup{path: path, name: name}
+			groupOrder = append(groupOrder, path)
+		}
+		groups[path].sessions = append(groups[path].sessions, s)
+	}
+
+	// Build flattened view
+	// First item: "Start new session" (index 0 handled separately)
+
+	for _, path := range groupOrder {
+		g := groups[path]
+
+		// Add group header
+		m.sessionGroupedView = append(m.sessionGroupedView, sessionGroupItem{
+			isGroupHeader: true,
+			projectPath:   g.path,
+			projectName:   g.name,
+			sessionCount:  len(g.sessions),
+			session:       &g.sessions[0], // First session for display
+		})
+
+		// If expanded, add all sessions (skip first since it's shown in header)
+		if m.sessionGroupExpanded[path] {
+			for i := 1; i < len(g.sessions); i++ {
+				s := g.sessions[i]
+				m.sessionGroupedView = append(m.sessionGroupedView, sessionGroupItem{
+					isGroupHeader: false,
+					projectPath:   g.path,
+					session:       &s,
+				})
+			}
+		}
+	}
+}
+
 // selectSessionView renders the Claude session selector as an overlay dialog
 func (m Model) selectSessionView() string {
 	var b strings.Builder
@@ -170,14 +241,14 @@ func (m Model) selectSessionView() string {
 		startIdx = 0
 	}
 
-	totalItems := len(m.agentSessions) + 1 // +1 for "new session"
+	totalItems := len(m.sessionGroupedView) + 1 // +1 for "new session"
 
 	// Option 0: Start new session
 	if startIdx == 0 {
 		otherCount := len(m.agentSessions)
 		suffix := ""
 		if otherCount > 0 {
-			suffix = fmt.Sprintf(" (+%d other sessions)", otherCount)
+			suffix = fmt.Sprintf(" (+%d sessions)", otherCount)
 		}
 
 		if m.sessionCursor == 0 {
@@ -188,10 +259,10 @@ func (m Model) selectSessionView() string {
 		b.WriteString("\n")
 	}
 
-	// List existing sessions
+	// List grouped items
 	visibleCount := 1
-	for i, cs := range m.agentSessions {
-		itemIdx := i + 1
+	for i, item := range m.sessionGroupedView {
+		itemIdx := i + 1 // +1 because index 0 is "new session"
 
 		if itemIdx < startIdx {
 			continue
@@ -200,32 +271,79 @@ func (m Model) selectSessionView() string {
 			break
 		}
 
-		// Use last prompt (like Claude Code does)
-		prompt := cs.LastPrompt
-		if prompt == "" {
-			prompt = cs.FirstPrompt
-		}
-		maxPromptLen := 60
-		if len([]rune(prompt)) > maxPromptLen {
-			prompt = truncateRunes(prompt, maxPromptLen)
-		}
+		if item.isGroupHeader {
+			// This is a group header - show first session with (+N) indicator
+			cs := item.session
+			prompt := cs.LastPrompt
+			if prompt == "" {
+				prompt = cs.FirstPrompt
+			}
+			maxPromptLen := 50
+			if len([]rune(prompt)) > maxPromptLen {
+				prompt = truncateRunes(prompt, maxPromptLen)
+			}
 
-		timeAgo := formatTimeAgo(cs.UpdatedAt)
-		msgText := "messages"
-		if cs.MessageCount == 1 {
-			msgText = "message"
-		}
+			timeAgo := formatTimeAgo(cs.UpdatedAt)
+			msgText := "messages"
+			if cs.MessageCount == 1 {
+				msgText = "message"
+			}
 
-		// Format like Claude Code
-		if itemIdx == m.sessionCursor {
-			b.WriteString(selectedPromptStyle.Render(fmt.Sprintf("  ❯ ▶ %s", prompt)))
-			b.WriteString("\n")
-			b.WriteString(metaStyle.Render(fmt.Sprintf("      %s · %d %s", timeAgo, cs.MessageCount, msgText)))
-			b.WriteString("\n\n")
+			// Show project name and other sessions count
+			expanded := m.sessionGroupExpanded[item.projectPath]
+			expandIcon := "▶"
+			if expanded {
+				expandIcon = "▼"
+			}
+
+			otherSuffix := ""
+			if item.sessionCount > 1 {
+				otherSuffix = fmt.Sprintf(" (+%d other)", item.sessionCount-1)
+			}
+
+			projectDisplay := item.projectName
+			if len(projectDisplay) > 20 {
+				projectDisplay = "..." + projectDisplay[len(projectDisplay)-17:]
+			}
+
+			if itemIdx == m.sessionCursor {
+				b.WriteString(selectedPromptStyle.Render(fmt.Sprintf("  ❯ %s %s%s", expandIcon, prompt, otherSuffix)))
+				b.WriteString("\n")
+				b.WriteString(metaStyle.Render(fmt.Sprintf("      %s · %d %s · %s", timeAgo, cs.MessageCount, msgText, projectDisplay)))
+				b.WriteString("\n\n")
+			} else {
+				b.WriteString(fmt.Sprintf("    %s %s%s\n", expandIcon, prompt, otherSuffix))
+				b.WriteString(dimStyle.Render(fmt.Sprintf("      %s · %d %s · %s", timeAgo, cs.MessageCount, msgText, projectDisplay)))
+				b.WriteString("\n\n")
+			}
 		} else {
-			b.WriteString(fmt.Sprintf("    %s\n", prompt))
-			b.WriteString(dimStyle.Render(fmt.Sprintf("      %s · %d %s", timeAgo, cs.MessageCount, msgText)))
-			b.WriteString("\n\n")
+			// This is a child session (expanded from a group)
+			cs := item.session
+			prompt := cs.LastPrompt
+			if prompt == "" {
+				prompt = cs.FirstPrompt
+			}
+			maxPromptLen := 48
+			if len([]rune(prompt)) > maxPromptLen {
+				prompt = truncateRunes(prompt, maxPromptLen)
+			}
+
+			timeAgo := formatTimeAgo(cs.UpdatedAt)
+			msgText := "messages"
+			if cs.MessageCount == 1 {
+				msgText = "message"
+			}
+
+			if itemIdx == m.sessionCursor {
+				b.WriteString(selectedPromptStyle.Render(fmt.Sprintf("  ❯   ├─ %s", prompt)))
+				b.WriteString("\n")
+				b.WriteString(metaStyle.Render(fmt.Sprintf("          %s · %d %s", timeAgo, cs.MessageCount, msgText)))
+				b.WriteString("\n\n")
+			} else {
+				b.WriteString(fmt.Sprintf("      ├─ %s\n", prompt))
+				b.WriteString(dimStyle.Render(fmt.Sprintf("          %s · %d %s", timeAgo, cs.MessageCount, msgText)))
+				b.WriteString("\n\n")
+			}
 		}
 		visibleCount++
 	}
@@ -233,11 +351,11 @@ func (m Model) selectSessionView() string {
 	// Show more indicator
 	remaining := totalItems - startIdx - maxVisible
 	if remaining > 0 {
-		b.WriteString(dimStyle.Render(fmt.Sprintf("    ... and %d more sessions\n", remaining)))
+		b.WriteString(dimStyle.Render(fmt.Sprintf("    ... and %d more items\n", remaining)))
 	}
 
 	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("  ↑/↓ navigate • enter select • esc cancel"))
+	b.WriteString(helpStyle.Render("  ↑/↓ navigate • enter select • →/← expand/collapse • esc cancel"))
 	b.WriteString("\n")
 
 	// Calculate box width based on content

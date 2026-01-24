@@ -150,7 +150,7 @@ func (m Model) buildPreviewPane(contentHeight int) string {
 
 						// Resume ID (if any)
 						if s.ResumeSessionID != "" {
-							rightPane.WriteString("    " + projectLabelStyle.Render("Resume: ") + projectNameStyle.Render(s.ResumeSessionID[:8]))
+							rightPane.WriteString("    " + projectLabelStyle.Render("Session: ") + projectNameStyle.Render(s.ResumeSessionID))
 							rightPane.WriteString("\n")
 						}
 
@@ -346,7 +346,7 @@ func (m Model) buildPreviewPane(contentHeight int) string {
 	}
 
 	if resumeID != "" {
-		rightPane.WriteString("  " + projectLabelStyle.Render("Resume: ") + projectNameStyle.Render(resumeID[:8]))
+		rightPane.WriteString("  " + projectLabelStyle.Render("Session: ") + projectNameStyle.Render(resumeID))
 		rightPane.WriteString("\n")
 	}
 

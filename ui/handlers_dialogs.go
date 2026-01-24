@@ -116,6 +116,15 @@ func (m Model) handleNewNameKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// Check for existing agent sessions (for agents that support resume)
 			agentConfig := session.AgentConfigs[m.pendingAgent]
 			if agentConfig.SupportsResume {
+				// For Claude: ask user if they want new or continue existing
+				if m.pendingAgent == session.AgentClaude || m.pendingAgent == "" {
+					m.pendingInstance = inst
+					m.newSessionChoiceCursor = 0 // Default to new session
+					m.state = stateNewSessionChoice
+					return m, nil
+				}
+
+				// Other agents: use custom session list
 				var sessions []session.AgentSession
 				var err error
 
@@ -128,9 +137,6 @@ func (m Model) handleNewNameKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					sessions, err = session.ListOpenCodeSessions(inst.Path)
 				case session.AgentAmazonQ:
 					sessions, err = session.ListAmazonQSessions(inst.Path)
-				default:
-					// Claude and others
-					sessions, err = session.ListAgentSessions(inst.Path)
 				}
 
 				if err != nil {
@@ -140,6 +146,7 @@ func (m Model) handleNewNameKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				if len(sessions) > 0 {
 					m.pendingInstance = inst
 					m.agentSessions = sessions
+					m.buildSessionGroupedView()
 					m.sessionCursor = 1 // Start with first session selected (0 is "new session")
 					m.state = stateSelectAgentSession
 					return m, nil
@@ -147,6 +154,12 @@ func (m Model) handleNewNameKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 
 			// No existing sessions or agent doesn't support resume, just create new
+			// Reload instances from storage to ensure we have the latest state
+			freshInstances, loadErr := m.storage.Load()
+			if loadErr == nil {
+				m.instances = freshInstances
+			}
+
 			if err := m.storage.AddInstance(inst); err != nil {
 				m.err = err
 				m.previousState = stateList
@@ -218,11 +231,12 @@ func (m Model) handleNewPathKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // handleSelectSessionKeys handles keyboard input in the Claude session selector
 func (m Model) handleSelectSessionKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	maxIdx := len(m.agentSessions) // max index (0 = new session, 1+ = existing sessions)
+	maxIdx := len(m.sessionGroupedView) // max index (0 = new session, 1+ = grouped items)
 
 	switch msg.String() {
 	case "q", "esc":
 		m.agentSessions = nil
+		m.sessionGroupedView = nil
 		m.pendingInstance = nil
 		m.state = stateList
 		return m, nil
@@ -257,11 +271,61 @@ func (m Model) handleSelectSessionKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "end":
 		m.sessionCursor = maxIdx
 
+	case "right", "l":
+		// Expand group if on group header
+		if m.sessionCursor > 0 && m.sessionCursor <= len(m.sessionGroupedView) {
+			item := m.sessionGroupedView[m.sessionCursor-1]
+			if item.isGroupHeader && item.sessionCount > 1 {
+				if m.sessionGroupExpanded == nil {
+					m.sessionGroupExpanded = make(map[string]bool)
+				}
+				if !m.sessionGroupExpanded[item.projectPath] {
+					m.sessionGroupExpanded[item.projectPath] = true
+					m.buildSessionGroupedView()
+				}
+			}
+		}
+
+	case "left", "h":
+		// Collapse group if on group header or child
+		if m.sessionCursor > 0 && m.sessionCursor <= len(m.sessionGroupedView) {
+			item := m.sessionGroupedView[m.sessionCursor-1]
+			path := item.projectPath
+			if m.sessionGroupExpanded != nil && m.sessionGroupExpanded[path] {
+				m.sessionGroupExpanded[path] = false
+				// Move cursor to group header
+				m.buildSessionGroupedView()
+				// Find the group header for this path
+				for i, it := range m.sessionGroupedView {
+					if it.isGroupHeader && it.projectPath == path {
+						m.sessionCursor = i + 1
+						break
+					}
+				}
+			}
+		}
+
 	case "enter":
 		var resumeID string
-		if m.sessionCursor > 0 && m.sessionCursor <= len(m.agentSessions) {
-			// Selected an existing session
-			resumeID = m.agentSessions[m.sessionCursor-1].SessionID
+		if m.sessionCursor > 0 && m.sessionCursor <= len(m.sessionGroupedView) {
+			item := m.sessionGroupedView[m.sessionCursor-1]
+			if item.isGroupHeader {
+				// If group has only one session or we want to select the first one, use it
+				// If group has multiple and is collapsed, expand it instead
+				if item.sessionCount > 1 && !m.sessionGroupExpanded[item.projectPath] {
+					// Expand the group instead of selecting
+					if m.sessionGroupExpanded == nil {
+						m.sessionGroupExpanded = make(map[string]bool)
+					}
+					m.sessionGroupExpanded[item.projectPath] = true
+					m.buildSessionGroupedView()
+					return m, nil
+				}
+			}
+			// Get the session from the item
+			if item.session != nil {
+				resumeID = item.session.SessionID
+			}
 		}
 		// sessionCursor == 0 means "Start new session"
 
@@ -276,6 +340,7 @@ func (m Model) handleSelectSessionKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.state = stateError
 				m.pendingInstance = nil
 				m.agentSessions = nil
+				m.sessionGroupedView = nil
 				return m, nil
 			}
 
@@ -332,6 +397,7 @@ func (m Model) handleSelectSessionKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 		m.agentSessions = nil
+		m.sessionGroupedView = nil
 		m.state = stateList
 		return m, nil
 	}
@@ -944,6 +1010,7 @@ func (m Model) handleNewTabChoiceKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) handleNewTabKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
+		m.newTabContinueExisting = false
 		m.state = stateList
 		return m, nil
 	case "enter":
@@ -956,6 +1023,56 @@ func (m Model) handleNewTabKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					} else {
 						name = "shell"
 					}
+				}
+
+				// Check if this is a "Continue Existing" Claude tab
+				if m.newTabIsAgent && m.newTabAgent == session.AgentClaude && m.newTabContinueExisting {
+					// Create tab with resume picker
+					config := inst.GetAgentConfig()
+					sessionName := inst.TmuxSessionName()
+
+					// Build resume command
+					resumeCmd := config.Command + " " + config.ResumeFlag
+
+					// Create new window with resume picker
+					cmd := exec.Command("tmux", "new-window", "-t", sessionName, "-c", inst.Path, "-n", name, resumeCmd)
+					if err := cmd.Run(); err != nil {
+						m.err = fmt.Errorf("failed to create resume tab: %w", err)
+						m.previousState = stateList
+						m.state = stateError
+						m.newTabContinueExisting = false
+						return m, nil
+					}
+
+					// Get the new window index
+					newWindowIdx := inst.GetCurrentWindowIndex()
+
+					// Set remain-on-exit so window stays open when command exits
+					target := fmt.Sprintf("%s:%d", sessionName, newWindowIdx)
+					exec.Command("tmux", "set-option", "-t", target, "remain-on-exit", "on").Run()
+
+					// Track as followed window
+					inst.FollowedWindows = append(inst.FollowedWindows, session.FollowedWindow{
+						Index: newWindowIdx,
+						Name:  name,
+						Agent: session.AgentClaude,
+					})
+
+					// Refresh status bar
+					RefreshTmuxStatusBarFull(sessionName, inst.Name, inst.Color, inst.BgColor, inst)
+					m.storage.UpdateInstance(inst)
+
+					// Set flags for session ID sync (sync to this specific tab)
+					m.pendingResumeSync = true
+					m.resumeSyncTime = time.Now()
+					m.resumeSyncWindowIdx = newWindowIdx
+
+					m.newTabContinueExisting = false
+					m.state = stateList
+					attachCmd := exec.Command("tmux", "attach-session", "-t", sessionName)
+					return m, tea.ExecProcess(attachCmd, func(err error) tea.Msg {
+						return reattachMsg{}
+					})
 				}
 
 				if m.newTabIsAgent {
@@ -974,6 +1091,7 @@ func (m Model) handleNewTabKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.storage.UpdateInstance(inst) // Save followed windows
 			}
 		}
+		m.newTabContinueExisting = false
 		m.state = stateList
 		return m, nil
 	}
@@ -1050,6 +1168,14 @@ func (m Model) handleNewTabAgentKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// For Claude: ask if new session or continue existing
+		if m.newTabAgent == session.AgentClaude {
+			m.err = nil
+			m.newTabSessionChoiceCursor = 0 // Default to new session
+			m.state = stateNewTabSessionChoice
+			return m, nil
+		}
+
 		// Command exists, proceed to name input
 		m.err = nil
 		m.nameInput.SetValue("")
@@ -1101,19 +1227,17 @@ func (m Model) handleConfirmDeleteTabKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y", "Y":
 		if m.deleteTarget != nil {
-			windows := m.deleteTarget.GetWindowList()
-			for _, w := range windows {
-				if w.Active && w.Index != 0 {
-					if err := m.deleteTarget.CloseWindow(w.Index); err != nil {
-						m.err = err
-						m.previousState = stateList
-						m.state = stateError
-					} else {
-						// Refresh status bar (may hide tabs if only 1 window left)
-						configureTmuxStatusBar(m.deleteTarget.TmuxSessionName(), m.deleteTarget.Name, m.deleteTarget.Color, m.deleteTarget.BgColor, m.deleteTarget.AutoYes)
-						m.storage.UpdateInstance(m.deleteTarget)
-					}
-					break
+			// Get current active window index directly from tmux
+			currentIdx := m.deleteTarget.GetCurrentWindowIndex()
+			if currentIdx > 0 { // Can't delete main agent window (index 0)
+				if err := m.deleteTarget.CloseWindow(currentIdx); err != nil {
+					m.err = err
+					m.previousState = stateList
+					m.state = stateError
+				} else {
+					// Refresh status bar (may hide tabs if only 1 window left)
+					configureTmuxStatusBar(m.deleteTarget.TmuxSessionName(), m.deleteTarget.Name, m.deleteTarget.Color, m.deleteTarget.BgColor, m.deleteTarget.AutoYes)
+					m.storage.UpdateInstance(m.deleteTarget)
 				}
 			}
 		}
@@ -1153,22 +1277,58 @@ func (m Model) handleConfirmStopTabKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y", "Y":
 		if m.stopTarget != nil {
-			windows := m.stopTarget.GetWindowList()
-			for _, w := range windows {
-				if w.Active {
-					if err := m.stopTarget.StopWindow(w.Index); err != nil {
-						m.err = err
-						m.previousState = stateList
-						m.state = stateError
-					}
-					break
-				}
+			// Get current active window index directly from tmux
+			currentIdx := m.stopTarget.GetCurrentWindowIndex()
+			if err := m.stopTarget.StopWindow(currentIdx); err != nil {
+				m.err = err
+				m.previousState = stateList
+				m.state = stateError
+			} else {
+				// Save the stopped state
+				m.storage.UpdateInstance(m.stopTarget)
 			}
 		}
 		m.stopTarget = nil
 		m.state = stateList
 	case "n", "N", "esc":
 		m.stopTarget = nil
+		m.state = stateList
+	}
+	return m, nil
+}
+
+// handleResumeTabChoiceKeys handles keyboard input in the resume stopped tab dialog
+func (m Model) handleResumeTabChoiceKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "up", "k":
+		if m.resumeTabCursor > 0 {
+			m.resumeTabCursor--
+		}
+	case "down", "j":
+		if m.resumeTabCursor < len(m.resumeTabStoppedTabs)-1 {
+			m.resumeTabCursor++
+		}
+	case "enter":
+		if m.resumeTabTarget != nil && m.resumeTabCursor < len(m.resumeTabStoppedTabs) {
+			selectedTab := m.resumeTabStoppedTabs[m.resumeTabCursor]
+			newIdx, err := m.resumeTabTarget.ResumeStoppedTab(selectedTab.Index)
+			if err != nil {
+				m.err = err
+				m.previousState = stateList
+				m.state = stateError
+			} else {
+				m.storage.UpdateInstance(m.resumeTabTarget)
+				// Switch to the new window
+				sessionName := m.resumeTabTarget.TmuxSessionName()
+				exec.Command("tmux", "select-window", "-t", fmt.Sprintf("%s:%d", sessionName, newIdx)).Run()
+			}
+		}
+		m.resumeTabTarget = nil
+		m.resumeTabStoppedTabs = nil
+		m.state = stateList
+	case "esc":
+		m.resumeTabTarget = nil
+		m.resumeTabStoppedTabs = nil
 		m.state = stateList
 	}
 	return m, nil
@@ -2167,4 +2327,296 @@ func (m Model) handleForkDialogKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.forkNameInput, cmd = m.forkNameInput.Update(msg)
 	return m, cmd
+}
+
+// handleResumeChoiceKeys handles keyboard input in the resume choice dialog
+func (m Model) handleResumeChoiceKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.resumeTarget = nil
+		m.state = stateList
+		return m, nil
+
+	case "up", "k":
+		if m.resumeChoiceCursor > 0 {
+			m.resumeChoiceCursor--
+		}
+		return m, nil
+
+	case "down", "j":
+		if m.resumeChoiceCursor < 1 {
+			m.resumeChoiceCursor++
+		}
+		return m, nil
+
+	case "t", "T", "1":
+		m.resumeChoiceCursor = 0
+		return m, nil
+
+	case "r", "R", "2":
+		m.resumeChoiceCursor = 1
+		return m, nil
+
+	case "enter":
+		inst := m.resumeTarget
+		if inst == nil {
+			m.state = stateList
+			return m, nil
+		}
+
+		if m.resumeChoiceCursor == 0 {
+			// New tab: go to name input first
+			if inst.Status != session.StatusRunning {
+				// Session not running - start it first with resume
+				m.resumeTarget = nil
+				return m, m.launchAgentResume(inst)
+			}
+
+			// Session is running - ask for tab name first
+			agentType := inst.Agent
+			if agentType == "" {
+				agentType = session.AgentClaude
+			}
+			m.newTabIsAgent = true
+			m.newTabAgent = agentType
+			m.newTabContinueExisting = true
+			m.nameInput.SetValue("")
+			m.nameInput.Focus()
+			m.resumeTarget = nil
+			m.state = stateNewTab
+			return m, nil
+
+		} else {
+			// Replace: replace current tab only with resume picker
+			if inst.Status == session.StatusRunning {
+				currentWindowIdx := inst.GetCurrentWindowIndex()
+				sessionName := inst.TmuxSessionName()
+				config := inst.GetAgentConfig()
+
+				if currentWindowIdx == 0 {
+					// Main window - respawn with resume picker
+					target := fmt.Sprintf("%s:0", sessionName)
+					// Kill current pane and respawn with resume command
+					resumeCmd := config.Command + " " + config.ResumeFlag
+					if inst.AutoYes && config.SupportsAutoYes && config.AutoYesFlag != "" {
+						resumeCmd = resumeCmd + " " + config.AutoYesFlag
+					}
+					exec.Command("tmux", "respawn-pane", "-t", target, "-k", resumeCmd).Run()
+
+					// Clear main session ID since we're picking new one
+					inst.ResumeSessionID = ""
+					m.storage.UpdateInstance(inst)
+
+					m.pendingResumeSync = true
+					m.resumeSyncTime = time.Now()
+					m.resumeSyncWindowIdx = 0
+
+					m.resumeTarget = nil
+					m.state = stateList
+					attachCmd := exec.Command("tmux", "attach-session", "-t", sessionName)
+					return m, tea.ExecProcess(attachCmd, func(err error) tea.Msg {
+						return reattachMsg{}
+					})
+				} else {
+					// Tab window - kill and recreate with resume picker
+					target := fmt.Sprintf("%s:%d", sessionName, currentWindowIdx)
+
+					// Get old window name from FollowedWindows
+					oldName := "resume"
+					var oldFwIdx int = -1
+					for idx, fw := range inst.FollowedWindows {
+						if fw.Index == currentWindowIdx {
+							oldName = fw.Name
+							oldFwIdx = idx
+							break
+						}
+					}
+
+					// Kill the window
+					exec.Command("tmux", "kill-window", "-t", target).Run()
+
+					// Remove from FollowedWindows
+					if oldFwIdx >= 0 {
+						inst.FollowedWindows = append(inst.FollowedWindows[:oldFwIdx], inst.FollowedWindows[oldFwIdx+1:]...)
+					}
+
+					// Create new window with resume picker
+					resumeCmd := config.Command + " " + config.ResumeFlag
+					cmd := exec.Command("tmux", "new-window", "-t", sessionName, "-c", inst.Path, "-n", oldName, resumeCmd)
+					cmd.Run()
+
+					// Get new window index
+					newWindowIdx := inst.GetCurrentWindowIndex()
+
+					// Set remain-on-exit
+					newTarget := fmt.Sprintf("%s:%d", sessionName, newWindowIdx)
+					exec.Command("tmux", "set-option", "-t", newTarget, "remain-on-exit", "on").Run()
+
+					// Add to FollowedWindows
+					agentType := inst.Agent
+					if agentType == "" {
+						agentType = session.AgentClaude
+					}
+					inst.FollowedWindows = append(inst.FollowedWindows, session.FollowedWindow{
+						Index: newWindowIdx,
+						Name:  oldName,
+						Agent: agentType,
+					})
+
+					RefreshTmuxStatusBarFull(sessionName, inst.Name, inst.Color, inst.BgColor, inst)
+					m.storage.UpdateInstance(inst)
+
+					m.pendingResumeSync = true
+					m.resumeSyncTime = time.Now()
+					m.resumeSyncWindowIdx = newWindowIdx
+
+					m.resumeTarget = nil
+					m.state = stateList
+					attachCmd := exec.Command("tmux", "attach-session", "-t", sessionName)
+					return m, tea.ExecProcess(attachCmd, func(err error) tea.Msg {
+						return reattachMsg{}
+					})
+				}
+			} else {
+				// Session not running - just start with resume picker
+				m.resumeTarget = nil
+				m.state = stateList
+				return m, m.launchAgentResume(inst)
+			}
+		}
+	}
+
+	return m, nil
+}
+
+// handleNewSessionChoiceKeys handles keyboard input in the new session choice dialog
+func (m Model) handleNewSessionChoiceKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.pendingInstance = nil
+		m.state = stateList
+		return m, nil
+
+	case "up", "k":
+		if m.newSessionChoiceCursor > 0 {
+			m.newSessionChoiceCursor--
+		}
+		return m, nil
+
+	case "down", "j":
+		if m.newSessionChoiceCursor < 1 {
+			m.newSessionChoiceCursor++
+		}
+		return m, nil
+
+	case "n", "N", "1":
+		m.newSessionChoiceCursor = 0
+		return m, nil
+
+	case "c", "C", "2":
+		m.newSessionChoiceCursor = 1
+		return m, nil
+
+	case "enter":
+		inst := m.pendingInstance
+		if inst == nil {
+			m.state = stateList
+			return m, nil
+		}
+
+		// Reload instances from storage to ensure we have the latest state
+		freshInstances, err := m.storage.Load()
+		if err == nil {
+			m.instances = freshInstances
+		}
+
+		// Add instance to storage
+		if err := m.storage.AddInstance(inst); err != nil {
+			m.err = err
+			m.previousState = stateList
+			m.state = stateError
+			m.pendingInstance = nil
+			return m, nil
+		}
+		m.instances = append(m.instances, inst)
+
+		// Set cursor to the new instance
+		if len(m.groups) > 0 {
+			m.buildVisibleItems()
+			for i, item := range m.visibleItems {
+				if !item.isGroup && item.instance != nil && item.instance.ID == inst.ID {
+					m.cursor = i
+					break
+				}
+			}
+		} else {
+			m.cursor = len(m.instances) - 1
+		}
+
+		m.pendingInstance = nil
+
+		if m.newSessionChoiceCursor == 0 {
+			// New session: start fresh
+			if err := inst.Start(); err != nil {
+				m.err = err
+				m.previousState = stateList
+				m.state = stateError
+				return m, nil
+			}
+			m.storage.UpdateInstance(inst)
+			m.state = stateList
+			return m, nil
+		} else {
+			// Continue existing: launch native resume picker
+			m.state = stateList
+			return m, m.launchAgentResume(inst)
+		}
+	}
+
+	return m, nil
+}
+
+// handleNewTabSessionChoiceKeys handles keyboard input in the new tab session choice dialog
+func (m Model) handleNewTabSessionChoiceKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.state = stateList
+		return m, nil
+
+	case "up", "k":
+		if m.newTabSessionChoiceCursor > 0 {
+			m.newTabSessionChoiceCursor--
+		}
+		return m, nil
+
+	case "down", "j":
+		if m.newTabSessionChoiceCursor < 1 {
+			m.newTabSessionChoiceCursor++
+		}
+		return m, nil
+
+	case "n", "N", "1":
+		m.newTabSessionChoiceCursor = 0
+		return m, nil
+
+	case "c", "C", "2":
+		m.newTabSessionChoiceCursor = 1
+		return m, nil
+
+	case "enter":
+		inst := m.getSelectedInstance()
+		if inst == nil || inst.Status != session.StatusRunning {
+			m.state = stateList
+			return m, nil
+		}
+
+		// Store the choice and proceed to name input in both cases
+		m.newTabContinueExisting = (m.newTabSessionChoiceCursor == 1)
+		m.nameInput.SetValue("")
+		m.nameInput.Focus()
+		m.state = stateNewTab
+		return m, textinput.Blink
+	}
+
+	return m, nil
 }

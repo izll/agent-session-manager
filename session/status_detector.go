@@ -298,6 +298,12 @@ func detectClaudeActivity(lines []string, patterns AgentPatterns) SessionActivit
 	// Second pass: check for busy patterns (case-insensitive)
 	for _, line := range allLinesToCheck {
 		lineLower := strings.ToLower(line)
+
+		// Skip "completed" lines - spinner + "for" means finished (e.g. "Churned for 1m", "Baked for 2m")
+		if strings.Contains(lineLower, " for ") {
+			continue
+		}
+
 		for _, pattern := range patterns.BusyPatterns {
 			if strings.Contains(lineLower, strings.ToLower(pattern)) {
 				return ActivityBusy

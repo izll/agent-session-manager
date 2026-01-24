@@ -87,6 +87,8 @@ func (m Model) View() string {
 		return m.stopChoiceView()
 	case stateConfirmStopTab:
 		return m.confirmStopTabView()
+	case stateResumeTabChoice:
+		return m.resumeTabChoiceView()
 	case stateConfirmYolo:
 		return m.confirmYoloView()
 	case stateSearch:
@@ -105,6 +107,12 @@ func (m Model) View() string {
 		return m.globalSearchNewNameView()
 	case stateGlobalSearchSelectMatch:
 		return m.globalSearchSelectMatchView()
+	case stateResumeChoice:
+		return m.resumeChoiceView()
+	case stateNewSessionChoice:
+		return m.newSessionChoiceView()
+	case stateNewTabSessionChoice:
+		return m.newTabSessionChoiceView()
 	default:
 		return m.listView()
 	}

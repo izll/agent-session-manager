@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -125,9 +126,9 @@ func configureTmuxStatusBarWithYolo(sessionName, instanceName, fgColor, bgColor 
 	exec.Command("tmux", "set-hook", "-t", sessionName, "window-unlinked", fmt.Sprintf("run-shell '%s'", refreshCmd)).Run()
 	exec.Command("tmux", "set-hook", "-t", sessionName, "session-window-changed", fmt.Sprintf("run-shell '%s'", refreshCmd)).Run()
 
-	// Key bindings for tab switching
-	exec.Command("tmux", "bind-key", "-n", "M-Left", "previous-window").Run()
-	exec.Command("tmux", "bind-key", "-n", "M-Right", "next-window").Run()
+	// Key bindings for tab switching (session-specific)
+	exec.Command("tmux", "bind-key", "-t", sessionName, "-n", "M-Left", "previous-window").Run()
+	exec.Command("tmux", "bind-key", "-t", sessionName, "-n", "M-Right", "next-window").Run()
 }
 
 // handleEnterSession starts (if needed) and attaches to the selected session
@@ -165,12 +166,13 @@ func (m *Model) handleEnterSession() tea.Cmd {
 		}
 		m.storage.UpdateInstance(inst)
 	} else {
-		// Session is running - check if active tab is dead and respawn it
+		// Session is running - check if any followed tab is dead and respawn it
 		windows := inst.GetWindowList()
 		for _, w := range windows {
-			if w.Active && w.Dead {
+			// Respawn any dead followed window (not just active)
+			if w.Dead && (w.Followed || w.Index == 0) {
 				inst.RespawnWindow(w.Index)
-				break
+				// Don't break - respawn all dead tabs
 			}
 		}
 	}
@@ -193,6 +195,36 @@ func (m *Model) handleEnterSession() tea.Cmd {
 	// Set up Ctrl+Q to resize to preview size before detach
 	tmuxWidth, tmuxHeight := m.calculateTmuxDimensions()
 	inst.UpdateDetachBinding(tmuxWidth, tmuxHeight)
+
+	// Check if any Claude window (main or tab) needs session ID sync
+	// Get currently active window
+	activeWindowIdx := inst.GetCurrentWindowIndex()
+	needsSync := false
+	syncWindowIdx := 0
+
+	if activeWindowIdx == 0 {
+		// Main window - check if it's Claude without session ID
+		if (inst.Agent == session.AgentClaude || inst.Agent == "") && inst.ResumeSessionID == "" {
+			needsSync = true
+			syncWindowIdx = 0
+		}
+	} else {
+		// Tab window - check if it's a Claude tab without session ID
+		for _, fw := range inst.FollowedWindows {
+			if fw.Index == activeWindowIdx && fw.Agent == session.AgentClaude && fw.ResumeSessionID == "" {
+				needsSync = true
+				syncWindowIdx = activeWindowIdx
+				break
+			}
+		}
+	}
+
+	if needsSync {
+		m.pendingResumeSync = true
+		m.resumeSyncTime = time.Now()
+		m.resumeSyncWindowIdx = syncWindowIdx
+	}
+
 	cmd := exec.Command("tmux", "attach-session", "-t", sessionName)
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		return reattachMsg{}
@@ -252,8 +284,8 @@ func (m *Model) handleResumeSession() error {
 	case session.AgentAmazonQ:
 		sessions, err = session.ListAmazonQSessions(inst.Path)
 	default:
-		// Claude and others
-		sessions, err = session.ListAgentSessions(inst.Path)
+		// Claude: use history.jsonl to find sessions for this project path (EXACT match)
+		sessions, err = session.ListAgentSessionsByHistory(inst.Path)
 	}
 
 	if err != nil {
@@ -263,6 +295,7 @@ func (m *Model) handleResumeSession() error {
 		return fmt.Errorf("no previous %s sessions found", agentType)
 	}
 	m.agentSessions = sessions
+	m.buildSessionGroupedView()
 	m.resumeAgentType = agentType           // Store which agent type we're resuming
 	m.resumeWindowIndex = activeWindowIndex // Store which window to resume
 	m.sessionCursor = 1                     // Start with first session selected (0 is "new session")
@@ -425,6 +458,100 @@ func (m *Model) handleForceResize() {
 		m.previousState = stateList
 		m.state = stateError
 	}
+}
+
+// launchAgentResume launches the agent's native resume picker
+// This sends the resume command to the tmux session and attaches
+func (m *Model) launchAgentResume(inst *session.Instance) tea.Cmd {
+	if inst == nil {
+		return nil
+	}
+
+	config := inst.GetAgentConfig()
+	if !config.SupportsResume {
+		return nil
+	}
+
+	// Set flag for sync after detach (only updates if user sends a message)
+	m.pendingResumeSync = true
+	m.resumeSyncTime = time.Now()
+
+	// If session is not running, start it with resume picker
+	if inst.Status != session.StatusRunning {
+		// Check if command exists
+		if err := session.CheckAgentCommand(inst); err != nil {
+			m.err = err
+			m.previousState = stateList
+			m.state = stateError
+			return nil
+		}
+
+		// Always show picker - user might want to override/change session
+		startCmd := config.Command + " " + config.ResumeFlag
+
+		// Add auto-yes flag if enabled
+		if inst.AutoYes && config.SupportsAutoYes && config.AutoYesFlag != "" {
+			startCmd = startCmd + " " + config.AutoYesFlag
+		}
+
+		// Create tmux session
+		sessionName := inst.TmuxSessionName()
+		cmd := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "-c", inst.Path, startCmd)
+		if err := cmd.Run(); err != nil {
+			m.err = fmt.Errorf("failed to create tmux session: %w", err)
+			m.previousState = stateList
+			m.state = stateError
+			return nil
+		}
+
+		inst.Status = session.StatusRunning
+		m.storage.UpdateInstance(inst)
+
+		// Configure tmux settings
+		exec.Command("tmux", "set-option", "-t", sessionName, "history-limit", "50000").Run()
+		exec.Command("tmux", "set-option", "-t", sessionName, "mouse", "on").Run()
+		exec.Command("tmux", "set-option", "-t", sessionName, "window-size", "latest").Run()
+		exec.Command("tmux", "set-option", "-t", sessionName, "aggressive-resize", "on").Run()
+		exec.Command("tmux", "rename-window", "-t", sessionName+":0", inst.WindowName()).Run()
+
+		// Configure status bar
+		RefreshTmuxStatusBarFull(sessionName, inst.Name, inst.Color, inst.BgColor, inst)
+
+		// Attach to the session
+		attachCmd := exec.Command("tmux", "attach-session", "-t", sessionName)
+		return tea.ExecProcess(attachCmd, func(err error) tea.Msg {
+			return reattachMsg{}
+		})
+	}
+
+	// Build the resume command for running session (picker mode)
+	var resumeCmd string
+	if config.ResumeIsSubcommand {
+		resumeCmd = config.Command + " " + config.ResumeFlag
+	} else {
+		resumeCmd = config.Command + " " + config.ResumeFlag
+	}
+
+	// Session is already running - send the resume command to the active pane
+	sessionName := inst.TmuxSessionName()
+
+	// First, clear any existing input (Ctrl+C + Ctrl+U)
+	exec.Command("tmux", "send-keys", "-t", sessionName, "C-c").Run()
+	exec.Command("tmux", "send-keys", "-t", sessionName, "C-u").Run()
+
+	// Send the resume command
+	if err := exec.Command("tmux", "send-keys", "-t", sessionName, resumeCmd, "Enter").Run(); err != nil {
+		m.err = fmt.Errorf("failed to send resume command: %w", err)
+		m.previousState = stateList
+		m.state = stateError
+		return nil
+	}
+
+	// Attach to the session
+	attachCmd := exec.Command("tmux", "attach-session", "-t", sessionName)
+	return tea.ExecProcess(attachCmd, func(err error) tea.Msg {
+		return reattachMsg{}
+	})
 }
 
 // handleToggleAutoYes shows confirmation dialog for toggling YOLO mode on the active tab
