@@ -126,9 +126,9 @@ func configureTmuxStatusBarWithYolo(sessionName, instanceName, fgColor, bgColor 
 	exec.Command("tmux", "set-hook", "-t", sessionName, "window-unlinked", fmt.Sprintf("run-shell '%s'", refreshCmd)).Run()
 	exec.Command("tmux", "set-hook", "-t", sessionName, "session-window-changed", fmt.Sprintf("run-shell '%s'", refreshCmd)).Run()
 
-	// Key bindings for tab switching (session-specific)
-	exec.Command("tmux", "bind-key", "-t", sessionName, "-n", "M-Left", "previous-window").Run()
-	exec.Command("tmux", "bind-key", "-t", sessionName, "-n", "M-Right", "next-window").Run()
+	// Key bindings for tab switching (conditional - only in asmgr-* sessions)
+	exec.Command("tmux", "bind-key", "-n", "M-Left", "if-shell", "tmux display -p '#{session_name}' | grep -q '^asmgr-'", "previous-window", "").Run()
+	exec.Command("tmux", "bind-key", "-n", "M-Right", "if-shell", "tmux display -p '#{session_name}' | grep -q '^asmgr-'", "next-window", "").Run()
 }
 
 // handleEnterSession starts (if needed) and attaches to the selected session

@@ -381,14 +381,14 @@ func (i *Instance) StartWithResume(resumeID string) error {
 		// Set terminal overrides for better key support
 		exec.Command("tmux", "set-option", "-t", sessionName, "-ga", "terminal-overrides", ",xterm*:smcup@:rmcup@").Run()
 
-		// Bind Shift+PageUp/Down for scrolling in copy mode (session-specific)
-		exec.Command("tmux", "bind-key", "-t", sessionName, "-T", "root", "S-PageUp", "copy-mode", "-eu").Run()
-		exec.Command("tmux", "bind-key", "-t", sessionName, "-T", "root", "S-PageDown", "send-keys", "PageDown").Run()
-		exec.Command("tmux", "bind-key", "-t", sessionName, "-T", "copy-mode-vi", "S-PageUp", "send-keys", "-X", "page-up").Run()
-		exec.Command("tmux", "bind-key", "-t", sessionName, "-T", "copy-mode-vi", "S-PageDown", "send-keys", "-X", "page-down").Run()
+		// Bind Shift+PageUp/Down for scrolling in copy mode (conditional - only in asmgr-* sessions)
+		exec.Command("tmux", "bind-key", "-T", "root", "S-PageUp", "if-shell", "tmux display -p '#{session_name}' | grep -q '^asmgr-'", "copy-mode -eu", "").Run()
+		exec.Command("tmux", "bind-key", "-T", "root", "S-PageDown", "if-shell", "tmux display -p '#{session_name}' | grep -q '^asmgr-'", "send-keys PageDown", "").Run()
+		exec.Command("tmux", "bind-key", "-T", "copy-mode-vi", "S-PageUp", "if-shell", "tmux display -p '#{session_name}' | grep -q '^asmgr-'", "send-keys -X page-up", "").Run()
+		exec.Command("tmux", "bind-key", "-T", "copy-mode-vi", "S-PageDown", "if-shell", "tmux display -p '#{session_name}' | grep -q '^asmgr-'", "send-keys -X page-down", "").Run()
 
-		// Bind Ctrl+Y for yolo mode toggle (session-specific, passes both session name and window index)
-		exec.Command("tmux", "bind-key", "-t", sessionName, "-n", "C-y", "run-shell", `asmgr yolo "$(tmux display-message -p '#{session_name}')" "$(tmux display-message -p '#{window_index}')" 2>/dev/null`).Run()
+		// Bind Ctrl+Y for yolo mode toggle (conditional - only in asmgr-* sessions)
+		exec.Command("tmux", "bind-key", "-n", "C-y", "if-shell", "tmux display -p '#{session_name}' | grep -q '^asmgr-'", `run-shell 'asmgr yolo "$(tmux display-message -p "#{session_name}")" "$(tmux display-message -p "#{window_index}")" 2>/dev/null'`, "").Run()
 
 		// Ctrl+q will be set up with resize in UpdateDetachBinding
 
@@ -1200,16 +1200,10 @@ func (i *Instance) UpdateDetachBinding(previewWidth, previewHeight int) {
 	if !i.IsAlive() {
 		return
 	}
-	sessionName := i.TmuxSessionName()
-	// Bind Ctrl+Q: ASM sessions get resize+detach, all others get plain detach
-	shellScript := fmt.Sprintf(`
-SESSION=$(tmux display-message -p '#{session_name}')
-if echo "$SESSION" | grep -q '^asm_'; then
-  tmux resize-window -t %s -x %d -y %d
-fi
-tmux detach-client
-`, sessionName, previewWidth, previewHeight)
-	exec.Command("tmux", "bind-key", "-t", sessionName, "-n", "C-q", "run-shell", shellScript).Run()
+	// Bind Ctrl+Q: conditional - only in asmgr-* sessions, with resize before detach
+	// Use if-shell for the condition check, then run-shell for the actual commands
+	resizeAndDetach := fmt.Sprintf("run-shell 'tmux resize-window -x %d -y %d 2>/dev/null; tmux detach-client'", previewWidth, previewHeight)
+	exec.Command("tmux", "bind-key", "-n", "C-q", "if-shell", "tmux display -p '#{session_name}' | grep -q '^asmgr-'", resizeAndDetach, "").Run()
 }
 
 
