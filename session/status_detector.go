@@ -29,16 +29,12 @@ var defaultSpinners = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", 
 var agentPatterns = map[AgentType]AgentPatterns{
 	AgentClaude: {
 		WaitingPatterns: []string{
+			"do you want to proceed",
+			"esc to cancel",
 			"allow once",
 			"allow always",
 			"yes, allow",
-			"no, and tell",
-			"esc to cancel",
-			"do you want to proceed",
-			"waiting for user",
-			"waiting for tool",
-			"apply this change",
-			"? for shortcuts",
+			"yes, and always allow",
 		},
 		BusyPatterns: []string{
 			"esc to interrupt",
@@ -233,6 +229,8 @@ func detectClaudeActivity(lines []string, patterns AgentPatterns) SessionActivit
 	var inputAreaLines []string
 	var aboveSeparatorLines []string // Lines above top separator (for thinking state)
 
+	var belowSeparatorLines []string // Lines below bottom separator (for permission dialog)
+
 	if len(separatorIndices) >= 2 {
 		// Normal mode: 2 separators, check between them
 		topSepIdx := separatorIndices[len(separatorIndices)-2]
@@ -248,7 +246,15 @@ func detectClaudeActivity(lines []string, patterns AgentPatterns) SessionActivit
 			}
 		}
 
-		// If only prompt line (or empty), check content ABOVE top separator
+		// Check content BELOW bottom separator separately (only for waiting patterns)
+		for idx := bottomSepIdx + 1; idx < len(lines); idx++ {
+			cleanLine := strings.TrimSpace(stripANSIForDetect(lines[idx]))
+			if cleanLine != "" {
+				belowSeparatorLines = append(belowSeparatorLines, cleanLine)
+			}
+		}
+
+		// If only prompt line (or empty) between separators, check content ABOVE top separator
 		// This is where Claude shows spinner and "esc to interrupt" during thinking
 		if contentCount <= 1 {
 			for j := topSepIdx - 1; j >= 0 && j >= topSepIdx-15; j-- {
@@ -257,6 +263,10 @@ func detectClaudeActivity(lines []string, patterns AgentPatterns) SessionActivit
 					// Skip UI elements and tips
 					if strings.HasPrefix(cleanLine, "╭") || strings.HasPrefix(cleanLine, "╰") ||
 						strings.HasPrefix(cleanLine, "└") || strings.HasPrefix(cleanLine, "Tip:") {
+						continue
+					}
+					// Skip continuation/result lines (these show completed operations)
+					if strings.Contains(cleanLine, "⎿") {
 						continue
 					}
 					aboveSeparatorLines = append(aboveSeparatorLines, cleanLine)
@@ -286,7 +296,9 @@ func detectClaudeActivity(lines []string, patterns AgentPatterns) SessionActivit
 	allLinesToCheck := append(inputAreaLines, aboveSeparatorLines...)
 
 	// First pass: check for waiting patterns (higher priority)
-	for _, line := range allLinesToCheck {
+	// Only check inputAreaLines and belowSeparatorLines (NOT aboveSeparatorLines - old dialogs may be there)
+	waitingLinesToCheck := append(inputAreaLines, belowSeparatorLines...)
+	for _, line := range waitingLinesToCheck {
 		lineLower := strings.ToLower(line)
 		for _, pattern := range patterns.WaitingPatterns {
 			if strings.Contains(lineLower, pattern) {
@@ -296,6 +308,7 @@ func detectClaudeActivity(lines []string, patterns AgentPatterns) SessionActivit
 	}
 
 	// Second pass: check for busy patterns (case-insensitive)
+	// Check inputAreaLines and aboveSeparatorLines (where spinners appear)
 	for _, line := range allLinesToCheck {
 		lineLower := strings.ToLower(line)
 

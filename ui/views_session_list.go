@@ -257,6 +257,12 @@ func (m Model) renderSessionRow(inst *session.Instance, index int, listWidth int
 					fwActivity = act
 				}
 			}
+
+			// Show "Waiting" for waiting activity
+			if fwActivity == session.ActivityWaiting {
+				fwLine = "Waiting"
+			}
+
 			fwTextStyle := m.getActivityTextStyle(fwActivity, selected)
 
 			// Last item gets └─, others get ├─
@@ -398,6 +404,15 @@ func (m Model) getActivityTextStyle(activity session.SessionActivity, selected b
 
 // getLastLine returns the last line of output for a session
 func (m Model) getLastLine(inst *session.Instance) string {
+	// Check if waiting for input - show "Waiting" instead of the actual line
+	if inst.Status == session.StatusRunning {
+		if winAct, ok := m.windowActivityState[inst.ID]; ok {
+			if act, ok := winAct[0]; ok && act == session.ActivityWaiting {
+				return "Waiting"
+			}
+		}
+	}
+
 	lastLine := m.lastLines[inst.ID]
 	if lastLine == "" {
 		if inst.Status == session.StatusRunning {
