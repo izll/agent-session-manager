@@ -223,10 +223,10 @@ func (m Model) renderSessionRow(inst *session.Instance, index int, listWidth int
 			mainConnector = "├─"
 		}
 
-		// Get activity-based color for main window (0)
+		// Activity of the agent's own window, whichever index that is.
 		mainActivity := session.ActivityIdle
 		if winAct, ok := m.windowActivityState[inst.ID]; ok {
-			if act, ok := winAct[0]; ok {
+			if act, ok := winAct[m.mainWindowIndex[inst.ID]]; ok {
 				mainActivity = act
 			}
 		}
@@ -407,7 +407,7 @@ func (m Model) getLastLine(inst *session.Instance) string {
 	// Check if waiting for input - show "Waiting" instead of the actual line
 	if inst.Status == session.StatusRunning {
 		if winAct, ok := m.windowActivityState[inst.ID]; ok {
-			if act, ok := winAct[0]; ok && act == session.ActivityWaiting {
+			if act, ok := winAct[m.mainWindowIndex[inst.ID]]; ok && act == session.ActivityWaiting {
 				return "Waiting"
 			}
 		}
@@ -929,10 +929,10 @@ func (m Model) renderGroupedSessionRow(inst *session.Instance, index int, listWi
 			mainConnector = "├─"
 		}
 
-		// Get activity-based color for main window (0)
+		// Activity of the agent's own window, whichever index that is.
 		mainActivity := session.ActivityIdle
 		if winAct, ok := m.windowActivityState[inst.ID]; ok {
-			if act, ok := winAct[0]; ok {
+			if act, ok := winAct[m.mainWindowIndex[inst.ID]]; ok {
 				mainActivity = act
 			}
 		}

@@ -37,6 +37,32 @@ func main() {
 				os.Exit(1)
 			}
 			return
+		case "--refresh-patterns":
+			// Manual counterpart to the daily background refresh: an agent's
+			// wording can change today and the answer should not be "wait for
+			// tomorrow, or for a new release".
+			version, updated, err := session.ForceRefreshPatterns()
+			if err != nil {
+				// The errors are i18n keys, for the desktop app's dialogs.
+				// On a terminal they have to be words.
+				reason := map[string]string{
+					"error.patternsUnreachable": "the pattern file could not be fetched",
+					"error.patternsInvalid":     "the fetched file is not valid pattern data",
+					"error.patternsNotWritten":  "the file could not be written to disk",
+				}[err.Error()]
+				if reason == "" {
+					reason = err.Error()
+				}
+				fmt.Fprintf(os.Stderr, "Could not refresh detection patterns: %s\n", reason)
+				fmt.Fprintf(os.Stderr, "The patterns already in use are unchanged.\n")
+				os.Exit(1)
+			}
+			if updated {
+				fmt.Printf("Detection patterns updated to version %d\n", version)
+			} else {
+				fmt.Printf("Detection patterns already current (version %d)\n", version)
+			}
+			return
 		case "refresh-status":
 			if len(os.Args) < 3 {
 				os.Exit(1)
@@ -56,6 +82,14 @@ func main() {
 			return
 		}
 	}
+
+	// Refresh the detection patterns in the background. They are what tells
+	// the app an agent is waiting for an answer, and an agent can reword its
+	// prompts at any time — without this, a changed phrase means the app stops
+	// noticing, fixable only by a new release. Off the startup path because it
+	// reaches the network, and every failure leaves the patterns already in
+	// place.
+	go session.RefreshPatterns()
 
 	model, err := ui.NewModel()
 	if err != nil {
@@ -79,6 +113,8 @@ Usage: %s [options]
 Options:
   -v, --version    Show version
   -u, --update     Update to latest version
+      --refresh-patterns
+                   Re-fetch the activity-detection patterns now
   -h, --help       Show this help
 
 Run without arguments to start the TUI.
@@ -212,7 +248,7 @@ func toggleYolo(tmuxSessionName, windowIndex string) error {
 	var agentType session.AgentType
 	var currentYolo bool
 
-	if windowIndex == "0" {
+	if windowIndex == fmt.Sprintf("%d", inst.GetMainWindowIndex()) {
 		// Main window
 		agentType = inst.Agent
 		if agentType == "" {
@@ -323,7 +359,10 @@ func confirmYolo(tmuxSessionName, windowIndex string, enableYolo bool) error {
 	var isFollowedWindow bool
 	var followedWindowIdx int
 
-	if windowIndex == "0" {
+	// The keybinding passes tmux's live #{window_index}, so this is a real
+	// index and has to be compared with one: against the literal "0" the main
+	// agent read as an untracked window, and Ctrl+Y refused to work on it.
+	if windowIndex == fmt.Sprintf("%d", inst.GetMainWindowIndex()) {
 		agentType = inst.Agent
 		if agentType == "" {
 			agentType = session.AgentClaude
@@ -382,4 +421,3 @@ func confirmYolo(tmuxSessionName, windowIndex string, enableYolo bool) error {
 
 	return nil
 }
-

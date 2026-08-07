@@ -111,20 +111,20 @@ var AgentConfigs = map[AgentType]AgentConfig{
 }
 
 type Instance struct {
-	ID              string    `json:"id"`
-	Name            string    `json:"name"`
-	Path            string    `json:"path"`
-	Status          Status    `json:"status"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
-	AutoYes         bool      `json:"auto_yes"`
-	ResumeSessionID string    `json:"resume_session_id,omitempty"` // Claude session ID to resume
-	Color           string    `json:"color,omitempty"`             // Foreground color
-	BgColor         string    `json:"bg_color,omitempty"`          // Background color
-	FullRowColor    bool      `json:"full_row_color,omitempty"`    // Extend background to full row
-	GroupID         string    `json:"group_id,omitempty"`          // Session group ID
-	Agent           AgentType `json:"agent,omitempty"`             // Agent type (claude, gemini, aider, custom)
-	CustomCommand   string    `json:"custom_command,omitempty"`    // Custom command for AgentCustom
+	ID              string           `json:"id"`
+	Name            string           `json:"name"`
+	Path            string           `json:"path"`
+	Status          Status           `json:"status"`
+	CreatedAt       time.Time        `json:"created_at"`
+	UpdatedAt       time.Time        `json:"updated_at"`
+	AutoYes         bool             `json:"auto_yes"`
+	ResumeSessionID string           `json:"resume_session_id,omitempty"` // Claude session ID to resume
+	Color           string           `json:"color,omitempty"`             // Foreground color
+	BgColor         string           `json:"bg_color,omitempty"`          // Background color
+	FullRowColor    bool             `json:"full_row_color,omitempty"`    // Extend background to full row
+	GroupID         string           `json:"group_id,omitempty"`          // Session group ID
+	Agent           AgentType        `json:"agent,omitempty"`             // Agent type (claude, gemini, aider, custom)
+	CustomCommand   string           `json:"custom_command,omitempty"`    // Custom command for AgentCustom
 	Notes           string           `json:"notes,omitempty"`             // User notes/comments for this session
 	FollowedWindows []FollowedWindow `json:"followed_windows,omitempty"`  // Windows tracked as agents (window 0 is main agent)
 	BaseCommitSHA   string           `json:"base_commit_sha,omitempty"`   // Git HEAD commit at session start (for diff)
@@ -263,6 +263,9 @@ func CheckAgentCommand(inst *Instance) error {
 }
 
 func (i *Instance) Start() error {
+	// A fresh tmux session: whatever was cached describes the previous one.
+	InvalidateMainWindow(i.TmuxSessionName())
+
 	return i.StartWithResume("")
 }
 
@@ -392,8 +395,15 @@ func (i *Instance) StartWithResume(resumeID string) error {
 
 		// Ctrl+q will be set up with resize in UpdateDetachBinding
 
-		// Set window 0 name to agent type (session name is shown in status bar)
-		exec.Command("tmux", "rename-window", "-t", sessionName+":0", i.WindowName()).Run()
+		// Mark the agent's window and name it. Not index 0 by assumption: the
+		// session was just created, so its only window is the agent's whatever
+		// number base-index gave it — and the marker is what lets that window
+		// still be found after tmux stops renumbering around a closed one.
+		if mainWindowIdx, ok := soleTmuxWindowIndex(sessionName); ok {
+			mainTarget := fmt.Sprintf("%s:%d", sessionName, mainWindowIdx)
+			exec.Command("tmux", "set-option", "-w", "-t", mainTarget, "@asmgr_main", "1").Run()
+			exec.Command("tmux", "rename-window", "-t", mainTarget, i.WindowName()).Run()
+		}
 
 		// Check if session is still alive after a short delay (detect immediate exit)
 		time.Sleep(300 * time.Millisecond)
@@ -496,10 +506,13 @@ func (i *Instance) restoreFollowedWindows() {
 	}
 
 	// Switch back to window 0 (main agent)
-	exec.Command("tmux", "select-window", "-t", sessionName+":0").Run()
+	exec.Command("tmux", "select-window", "-t",
+		fmt.Sprintf("%s:%d", sessionName, i.GetMainWindowIndex())).Run()
 }
 
 func (i *Instance) Stop() error {
+	InvalidateMainWindow(i.TmuxSessionName())
+
 	if i.Status != StatusRunning {
 		return nil
 	}
@@ -580,8 +593,22 @@ func (i *Instance) RespawnWindow(windowIdx int) error {
 	target := fmt.Sprintf("%s:%d", sessionName, windowIdx)
 
 	// Get the agent type for this window to build the command
+	// Which agent belongs in this window. Compared against the real main
+	// index, not 0: with the agent elsewhere this test used to fail, no
+	// followed window matched either, and the command came out empty — which
+	// respawn-pane treats as "start the default shell", replacing a running
+	// agent with a bare prompt.
+	mainWindowIdx, mainOK := i.getMainWindowIndex()
+	if !mainOK {
+		return fmt.Errorf("cannot identify the main agent window")
+	}
 	var agentCmd string
-	if windowIdx == 0 {
+	// Whether this window was recognised at all. A terminal tab legitimately
+	// has no command — respawn-pane then starts the shell, which is right —
+	// but so did "no window matched", and the two must not be confused.
+	windowKnown := false
+	if windowIdx == mainWindowIdx {
+		windowKnown = true
 		// Main window - use instance's agent
 		config := i.GetAgentConfig()
 		if i.Agent == AgentCustom {
@@ -600,6 +627,7 @@ func (i *Instance) RespawnWindow(windowIdx int) error {
 		// Followed window - find the agent type
 		for _, fw := range i.FollowedWindows {
 			if fw.Index == windowIdx {
+				windowKnown = true
 				if fw.Agent == AgentTerminal {
 					// Terminal - just respawn shell
 					agentCmd = ""
@@ -622,10 +650,25 @@ func (i *Instance) RespawnWindow(windowIdx int) error {
 	}
 
 	// Respawn the pane with the command
+	// respawn-pane -k on a missing numeric target does not fail: tmux falls
+	// back to the CURRENT window and exits 0, so a stale index destroys
+	// whatever the user is looking at. A tab can be Stopped — still tracked,
+	// but its window already killed — so being known is not the same as being
+	// there.
+	if !tmuxWindowExists(sessionName, windowIdx) {
+		return fmt.Errorf("tmux window %s:%d not found", sessionName, windowIdx)
+	}
+
 	if agentCmd != "" {
 		return exec.Command("tmux", "respawn-pane", "-k", "-t", target, agentCmd).Run()
 	}
-	// Empty command = default shell
+	if !windowKnown {
+		// Neither the main window nor a followed tab. Starting the default
+		// shell here would look like a working respawn while quietly
+		// replacing whatever was running, so say so instead.
+		return fmt.Errorf("no agent is tracked for window %d", windowIdx)
+	}
+	// A terminal tab: no command is correct, respawn-pane starts the shell.
 	return exec.Command("tmux", "respawn-pane", "-k", "-t", target).Run()
 }
 
@@ -639,8 +682,22 @@ func (i *Instance) RespawnWindowWithResume(windowIdx int, resumeID string) error
 	target := fmt.Sprintf("%s:%d", sessionName, windowIdx)
 
 	// Get the agent type for this window to build the command
+	// Which agent belongs in this window. Compared against the real main
+	// index, not 0: with the agent elsewhere this test used to fail, no
+	// followed window matched either, and the command came out empty — which
+	// respawn-pane treats as "start the default shell", replacing a running
+	// agent with a bare prompt.
+	mainWindowIdx, mainOK := i.getMainWindowIndex()
+	if !mainOK {
+		return fmt.Errorf("cannot identify the main agent window")
+	}
 	var agentCmd string
-	if windowIdx == 0 {
+	// Whether this window was recognised at all. A terminal tab legitimately
+	// has no command — respawn-pane then starts the shell, which is right —
+	// but so did "no window matched", and the two must not be confused.
+	windowKnown := false
+	if windowIdx == mainWindowIdx {
+		windowKnown = true
 		// Main window - use instance's agent
 		config := i.GetAgentConfig()
 		if i.Agent == AgentCustom {
@@ -662,6 +719,7 @@ func (i *Instance) RespawnWindowWithResume(windowIdx int, resumeID string) error
 		// Followed window - find the agent type
 		for _, fw := range i.FollowedWindows {
 			if fw.Index == windowIdx {
+				windowKnown = true
 				if fw.Agent == AgentTerminal {
 					// Terminal - just respawn shell
 					agentCmd = ""
@@ -687,10 +745,25 @@ func (i *Instance) RespawnWindowWithResume(windowIdx int, resumeID string) error
 	}
 
 	// Respawn the pane with the command
+	// respawn-pane -k on a missing numeric target does not fail: tmux falls
+	// back to the CURRENT window and exits 0, so a stale index destroys
+	// whatever the user is looking at. A tab can be Stopped — still tracked,
+	// but its window already killed — so being known is not the same as being
+	// there.
+	if !tmuxWindowExists(sessionName, windowIdx) {
+		return fmt.Errorf("tmux window %s:%d not found", sessionName, windowIdx)
+	}
+
 	if agentCmd != "" {
 		return exec.Command("tmux", "respawn-pane", "-k", "-t", target, agentCmd).Run()
 	}
-	// Empty command = default shell
+	if !windowKnown {
+		// Neither the main window nor a followed tab. Starting the default
+		// shell here would look like a working respawn while quietly
+		// replacing whatever was running, so say so instead.
+		return fmt.Errorf("no agent is tracked for window %d", windowIdx)
+	}
+	// A terminal tab: no command is correct, respawn-pane starts the shell.
 	return exec.Command("tmux", "respawn-pane", "-k", "-t", target).Run()
 }
 
@@ -799,18 +872,38 @@ func (i *Instance) CloseWindow(windowIdx int) error {
 		return fmt.Errorf("instance not running")
 	}
 
-	// Don't allow closing window 0 (main agent)
-	if windowIdx == 0 {
+	sessionName := i.TmuxSessionName()
+
+	// Refuse to close the agent's own window. Tested against the real index
+	// rather than 0: tmux does not renumber around a closed window, so on a
+	// session whose first window was recreated the agent sits elsewhere and
+	// this guard used to wave the request straight through.
+	mainWindowIdx, ok := i.getMainWindowIndex()
+	if !ok {
+		return fmt.Errorf("cannot identify the main agent window")
+	}
+	if windowIdx == mainWindowIdx {
 		return fmt.Errorf("cannot close main agent window")
 	}
 
-	sessionName := i.TmuxSessionName()
 	target := fmt.Sprintf("%s:%d", sessionName, windowIdx)
 
-	// Kill the tmux window
-	cmd := exec.Command("tmux", "kill-window", "-t", target)
-	if err := cmd.Run(); err != nil {
+	// tmux silently falls back to the CURRENT window for a missing numeric
+	// target and exits 0, so a stale index does not fail — it destroys
+	// whatever the user is looking at, which is usually the agent. Check
+	// membership first, and again afterwards, since an exit code alone does
+	// not tell us the right window went.
+	if !tmuxWindowExists(sessionName, windowIdx) {
+		return fmt.Errorf("tmux window %s not found", target)
+	}
+	if err := exec.Command("tmux", "kill-window", "-t", target).Run(); err != nil {
 		return fmt.Errorf("failed to close window: %w", err)
+	}
+	// The window set just changed; a cached answer would name a window that is
+	// no longer there.
+	InvalidateMainWindow(sessionName)
+	if tmuxWindowExists(sessionName, windowIdx) {
+		return fmt.Errorf("tmux window %s is still there after closing it", target)
 	}
 
 	// Remove from FollowedWindows
@@ -935,8 +1028,17 @@ type WindowInfo struct {
 
 // IsWindowFollowed checks if a window index is being tracked as an agent
 func (i *Instance) IsWindowFollowed(index int) bool {
-	// Window 0 is always followed (main agent)
-	if index == 0 {
+	return i.isWindowFollowed(index, i.GetMainWindowIndex())
+}
+
+// isWindowFollowed takes the main index rather than looking it up, so a caller
+// iterating windows makes one tmux call instead of one per window.
+func (i *Instance) isWindowFollowed(index, mainWindowIdx int) bool {
+	// The main agent's window is always followed. Compared against its real
+	// index, not 0: otherwise the agent's own window reported as unfollowed
+	// and dropped out of the window list's activity and info panels, while a
+	// tab that happened to sit at index 0 was reported as the agent.
+	if index == mainWindowIdx {
 		return true
 	}
 	for _, fw := range i.FollowedWindows {
@@ -949,9 +1051,16 @@ func (i *Instance) IsWindowFollowed(index int) bool {
 
 // GetFollowedWindow returns the FollowedWindow for a given index, or nil if not followed
 func (i *Instance) GetFollowedWindow(index int) *FollowedWindow {
-	// Window 0 is the main agent
-	if index == 0 {
-		return &FollowedWindow{Index: 0, Agent: i.Agent, Name: i.Name}
+	return i.getFollowedWindow(index, i.GetMainWindowIndex())
+}
+
+// getFollowedWindow takes the main index, for the same reason as
+// isWindowFollowed.
+func (i *Instance) getFollowedWindow(index, mainWindowIdx int) *FollowedWindow {
+	// The main window is never stored in FollowedWindows — its settings live
+	// on the instance — so a descriptor for it is synthesised here.
+	if index == mainWindowIdx {
+		return &FollowedWindow{Index: mainWindowIdx, Agent: i.Agent, Name: i.Name}
 	}
 	for idx := range i.FollowedWindows {
 		if i.FollowedWindows[idx].Index == index {
@@ -963,8 +1072,12 @@ func (i *Instance) GetFollowedWindow(index int) *FollowedWindow {
 
 // ToggleWindowFollow toggles the follow status of a window
 func (i *Instance) ToggleWindowFollow(index int) bool {
-	// Can't unfollow window 0
-	if index == 0 {
+	// The agent's own window cannot be unfollowed — and must never be added to
+	// FollowedWindows, which is what happened when this compared against 0:
+	// the main window ended up in the tab list, giving it a duplicate status
+	// line, a duplicate activity probe and a second entry everywhere that
+	// iterates tabs.
+	if index == i.GetMainWindowIndex() {
 		return true
 	}
 
@@ -986,12 +1099,26 @@ func (i *Instance) ToggleWindowFollow(index int) bool {
 	return true
 }
 
-// GetAllFollowedAgents returns info about all followed agents (including main window 0)
+// GetAllFollowedAgents returns every tracked agent, the session's own included.
+//
+// The main window is not stored in FollowedWindows — its settings live on the
+// instance — so its descriptor is synthesised here, carrying its real tmux
+// index. Hardcoding 0 handed callers an index that may name another tab, or
+// no window at all.
 func (i *Instance) GetAllFollowedAgents() []FollowedWindow {
+	mainWindowIdx := i.GetMainWindowIndex()
 	result := []FollowedWindow{
-		{Index: 0, Agent: i.Agent, Name: i.Name},
+		{Index: mainWindowIdx, Agent: i.Agent, Name: i.Name},
 	}
-	result = append(result, i.FollowedWindows...)
+	// Skip a tab claiming the main index. It should never be in this slice,
+	// but older data could put it there, and returning the same window twice
+	// gives every caller a duplicate agent to act on.
+	for _, fw := range i.FollowedWindows {
+		if fw.Index == mainWindowIdx {
+			continue
+		}
+		result = append(result, fw)
+	}
 	return result
 }
 
@@ -1002,6 +1129,9 @@ func (i *Instance) GetWindowList() []WindowInfo {
 	}
 
 	sessionName := i.TmuxSessionName()
+	// Resolved once for the whole list: the follow checks below need it for
+	// every window, and asking tmux per window turned one call into N.
+	mainWindowIdx := i.GetMainWindowIndex()
 	// Format: index:name:active_flag:pane_dead
 	cmd := exec.Command("tmux", "list-windows", "-t", sessionName, "-F", "#{window_index}:#{window_name}:#{window_active}:#{pane_dead}")
 	output, err := cmd.Output()
@@ -1022,9 +1152,9 @@ func (i *Instance) GetWindowList() []WindowInfo {
 
 			// Get agent type if followed
 			var agent AgentType
-			followed := i.IsWindowFollowed(idx)
+			followed := i.isWindowFollowed(idx, mainWindowIdx)
 			if followed {
-				if fw := i.GetFollowedWindow(idx); fw != nil {
+				if fw := i.getFollowedWindow(idx, mainWindowIdx); fw != nil {
 					agent = fw.Agent
 				}
 			}
@@ -1206,7 +1336,6 @@ func (i *Instance) UpdateDetachBinding(previewWidth, previewHeight int) {
 	exec.Command("tmux", "bind-key", "-n", "C-q", "if-shell", "tmux display -p '#{session_name}' | grep -q '^asm_'", resizeAndDetach, "").Run()
 }
 
-
 func (i *Instance) GetPreview(lines int) (string, error) {
 	if !i.IsAlive() {
 		return "(session not running)", nil
@@ -1278,9 +1407,12 @@ func (i *Instance) GetLastLine() string {
 	}
 
 	sessionName := i.TmuxSessionName()
-	// Always capture from window 0 (the agent window), not the currently active window
-	// This ensures we always show the agent's status even when user is on another tab
-	target := sessionName + ":0"
+	// The agent's own window, not the one the user happens to be looking at —
+	// the status line should keep showing the agent while they work in a tab.
+	// Its index is asked for rather than assumed to be 0: tmux does not
+	// renumber around a closed window, so on a session whose first window was
+	// recreated this used to show some other tab's output on every row.
+	target := fmt.Sprintf("%s:%d", sessionName, i.GetMainWindowIndex())
 	// Capture last 50 lines with colors (-e flag preserves ANSI escape sequences)
 	// -J flag joins wrapped lines (prevents terminal width wrapping issues)
 	cmd := exec.Command("tmux", "capture-pane", "-t", target, "-p", "-e", "-J", "-S", "-50")

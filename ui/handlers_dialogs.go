@@ -369,12 +369,12 @@ func (m Model) handleSelectSessionKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.pendingInstance = nil
 		} else if inst := m.getSelectedInstance(); inst != nil {
 			// Resuming existing instance - apply to specific window
-			if m.resumeWindowIndex == 0 {
+			if m.resumeWindowIndex == inst.GetMainWindowIndex() {
 				// Main window
 				inst.ResumeSessionID = resumeID
 				if inst.Status == session.StatusRunning {
 					// Respawn just the main window with new resume ID
-					inst.RespawnWindowWithResume(0, resumeID)
+					inst.RespawnWindowWithResume(m.resumeWindowIndex, resumeID)
 				} else {
 					if err := inst.StartWithResume(resumeID); err != nil {
 						m.err = err
@@ -954,7 +954,7 @@ func (m Model) handleNotesKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Save notes to session or tab
 		if inst := m.getSelectedInstance(); inst != nil {
 			notes := m.notesInput.Value()
-			if m.notesWindowIndex == 0 {
+			if m.notesWindowIndex == inst.GetMainWindowIndex() {
 				// Main session notes
 				inst.Notes = notes
 			} else {
@@ -1200,7 +1200,7 @@ func (m Model) handleDeleteChoiceKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			windows := m.deleteTarget.GetWindowList()
 			for _, w := range windows {
 				if w.Active {
-					if w.Index == 0 {
+					if w.Index == m.deleteTarget.GetMainWindowIndex() {
 						m.err = fmt.Errorf("cannot close main agent tab")
 						m.previousState = stateList
 						m.state = stateError
@@ -1342,8 +1342,13 @@ func (m Model) handleConfirmYoloKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			inst := m.yoloTarget
 			wasRunning := inst.Status == session.StatusRunning
 
-			// Toggle YOLO for the correct window
-			if m.yoloWindowIndex == 0 {
+			// Toggle YOLO for the correct window. Compared against the
+			// agent's real window, not 0: with the agent elsewhere the flag
+			// was written to no window at all — no followed tab matched
+			// either — and the respawn below then replaced a running agent
+			// with a bare shell.
+			mainWindowIdx := inst.GetMainWindowIndex()
+			if m.yoloWindowIndex == mainWindowIdx {
 				inst.AutoYes = m.yoloNewState
 			} else {
 				for idx, fw := range inst.FollowedWindows {
@@ -1358,7 +1363,7 @@ func (m Model) handleConfirmYoloKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 			// If running, respawn the window with new flag
 			if wasRunning {
-				if m.yoloWindowIndex == 0 {
+				if m.yoloWindowIndex == mainWindowIdx {
 					// Main window - restart session
 					inst.Stop()
 					if err := inst.Start(); err != nil {
@@ -2393,9 +2398,13 @@ func (m Model) handleResumeChoiceKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				sessionName := inst.TmuxSessionName()
 				config := inst.GetAgentConfig()
 
-				if currentWindowIdx == 0 {
+				// Compared against the agent's real window, not 0. With the
+				// agent elsewhere this test failed, and the else branch below
+				// killed its window and recreated it as an ordinary tab —
+				// losing the session's own identity along with its resume id.
+				if currentWindowIdx == inst.GetMainWindowIndex() {
 					// Main window - respawn with resume picker
-					target := fmt.Sprintf("%s:0", sessionName)
+					target := fmt.Sprintf("%s:%d", sessionName, currentWindowIdx)
 					// Kill current pane and respawn with resume command
 					resumeCmd := config.Command + " " + config.ResumeFlag
 					if inst.AutoYes && config.SupportsAutoYes && config.AutoYesFlag != "" {

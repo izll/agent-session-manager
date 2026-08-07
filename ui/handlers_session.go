@@ -168,9 +168,13 @@ func (m *Model) handleEnterSession() tea.Cmd {
 	} else {
 		// Session is running - check if any followed tab is dead and respawn it
 		windows := inst.GetWindowList()
+		mainWindowIdx := inst.GetMainWindowIndex()
 		for _, w := range windows {
-			// Respawn any dead followed window (not just active)
-			if w.Dead && (w.Followed || w.Index == 0) {
+			// Respawn any dead followed window (not just active). The agent's
+			// own window is matched by its real index: with it elsewhere, a
+			// dead main agent was neither followed nor 0, so nothing revived
+			// it and attaching landed in a dead pane.
+			if w.Dead && (w.Followed || w.Index == mainWindowIdx) {
 				inst.RespawnWindow(w.Index)
 				// Don't break - respawn all dead tabs
 			}
@@ -187,7 +191,8 @@ func (m *Model) handleEnterSession() tea.Cmd {
 	exec.Command("tmux", "set-hook", "-t", sessionName, "pane-focus-in", "resize-window -A").Run()
 
 	// Update window 0 name to agent type (session name is shown in status bar)
-	exec.Command("tmux", "rename-window", "-t", sessionName+":0", inst.WindowName()).Run()
+	exec.Command("tmux", "rename-window", "-t",
+		fmt.Sprintf("%s:%d", sessionName, inst.GetMainWindowIndex()), inst.WindowName()).Run()
 
 	// Configure tmux status bar to show tabs with per-window YOLO support
 	RefreshTmuxStatusBarFull(sessionName, inst.Name, inst.Color, inst.BgColor, inst)
@@ -199,14 +204,19 @@ func (m *Model) handleEnterSession() tea.Cmd {
 	// Check if any Claude window (main or tab) needs session ID sync
 	// Get currently active window
 	activeWindowIdx := inst.GetCurrentWindowIndex()
+	mainWindowIdx := inst.GetMainWindowIndex()
 	needsSync := false
-	syncWindowIdx := 0
+	syncWindowIdx := mainWindowIdx
 
-	if activeWindowIdx == 0 {
+	// Compared against the agent's real window, not 0: with the agent
+	// elsewhere this took the tab branch, matched nothing, and the session id
+	// was never captured — so resume quietly stopped working for the main
+	// agent while appearing to work for its tabs.
+	if activeWindowIdx == mainWindowIdx {
 		// Main window - check if it's Claude without session ID
 		if (inst.Agent == session.AgentClaude || inst.Agent == "") && inst.ResumeSessionID == "" {
 			needsSync = true
-			syncWindowIdx = 0
+			syncWindowIdx = mainWindowIdx
 		}
 	} else {
 		// Tab window - check if it's a Claude tab without session ID
@@ -330,16 +340,18 @@ func (m *Model) handleStartSession() {
 			m.storage.UpdateInstance(inst)
 		}
 	} else {
-		// Session is running - check if window 0 (main agent) is dead
+		// Session is running - check whether the agent's own window is dead
 		windows := inst.GetWindowList()
+		mainWindowIdx := inst.GetMainWindowIndex()
 		for _, w := range windows {
-			if w.Index == 0 && w.Dead {
-				// Window 0 is dead - respawn it with resume ID if available
+			if w.Index == mainWindowIdx && w.Dead {
+				// The agent's window is dead - respawn it, with its resume ID
+				// if there is one
 				var err error
 				if inst.ResumeSessionID != "" {
-					err = inst.RespawnWindowWithResume(0, inst.ResumeSessionID)
+					err = inst.RespawnWindowWithResume(w.Index, inst.ResumeSessionID)
 				} else {
-					err = inst.RespawnWindow(0)
+					err = inst.RespawnWindow(w.Index)
 				}
 				if err != nil {
 					m.err = err
@@ -512,7 +524,8 @@ func (m *Model) launchAgentResume(inst *session.Instance) tea.Cmd {
 		exec.Command("tmux", "set-option", "-t", sessionName, "mouse", "on").Run()
 		exec.Command("tmux", "set-option", "-t", sessionName, "window-size", "latest").Run()
 		exec.Command("tmux", "set-option", "-t", sessionName, "aggressive-resize", "on").Run()
-		exec.Command("tmux", "rename-window", "-t", sessionName+":0", inst.WindowName()).Run()
+		exec.Command("tmux", "rename-window", "-t",
+			fmt.Sprintf("%s:%d", sessionName, inst.GetMainWindowIndex()), inst.WindowName()).Run()
 
 		// Configure status bar
 		RefreshTmuxStatusBarFull(sessionName, inst.Name, inst.Color, inst.BgColor, inst)

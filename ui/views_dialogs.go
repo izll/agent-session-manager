@@ -458,7 +458,7 @@ func (m *Model) notesView() string {
 		if hasTabs {
 			title = " Tab Notes "
 			tabName := ""
-			if m.notesWindowIndex == 0 {
+			if m.notesWindowIndex == inst.GetMainWindowIndex() {
 				// Main window - use instance name
 				tabName = inst.Name
 			} else {
@@ -740,7 +740,7 @@ func (m Model) confirmYoloView() string {
 
 	// Determine what we're toggling
 	var targetName string
-	if m.yoloWindowIndex == 0 {
+	if m.yoloWindowIndex == inst.GetMainWindowIndex() {
 		targetName = inst.Name
 	} else {
 		for _, fw := range inst.FollowedWindows {

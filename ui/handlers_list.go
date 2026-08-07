@@ -513,8 +513,11 @@ func (m Model) handleListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.notesWindowIndex = windowIdx
 
-			// Load notes for the current window
-			if windowIdx == 0 {
+			// Load notes for the current window. Compared against the
+			// agent's real window: tmux does not renumber around a closed
+			// one, so 0 is not reliably the main window — the main agent's
+			// notes silently loaded and saved nothing.
+			if windowIdx == inst.GetMainWindowIndex() {
 				// Main session notes
 				m.notesInput.SetValue(inst.Notes)
 			} else {
