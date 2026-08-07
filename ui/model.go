@@ -39,25 +39,25 @@ const (
 
 // Layout constants
 const (
-	ListPaneWidth        = 45  // Fixed width for session list panel
-	BorderPadding        = 3   // Border and padding offset
-	MinPreviewWidth      = 40  // Minimum preview panel width
-	TmuxWidthOffset      = 2   // Offset to prevent line wrapping in tmux
-	HeightOffset         = 8   // Height offset for UI elements
-	MinContentHeight     = 10  // Minimum content height
-	MinPreviewLines      = 5   // Minimum preview lines to show
-	PreviewHeaderHeight  = 6   // Height of preview header area
-	ColorPickerHeader    = 12  // Height of color picker header
-	MinColorPickerRows   = 5   // Minimum visible color options
-	SessionListMaxItems  = 8   // Max visible items in session selector
-	PreviewLineCount     = 100  // Number of lines to capture for preview
-	ScrollbackLines      = 1000 // Number of lines for scroll history
-	GradientColorCount   = 15  // Number of gradient options (for background exclusion)
-	PromptMinWidth       = 50  // Minimum prompt input width
-	PromptMaxWidth       = 70  // Maximum prompt input width
-	TickInterval         = 100 * time.Millisecond // UI refresh interval for selected
-	SlowTickInterval     = 500 * time.Millisecond // UI refresh interval for others
-	FavoritesGroupID     = "__favorites__"        // Virtual group ID for favorites
+	ListPaneWidth       = 45                     // Fixed width for session list panel
+	BorderPadding       = 3                      // Border and padding offset
+	MinPreviewWidth     = 40                     // Minimum preview panel width
+	TmuxWidthOffset     = 2                      // Offset to prevent line wrapping in tmux
+	HeightOffset        = 8                      // Height offset for UI elements
+	MinContentHeight    = 10                     // Minimum content height
+	MinPreviewLines     = 5                      // Minimum preview lines to show
+	PreviewHeaderHeight = 6                      // Height of preview header area
+	ColorPickerHeader   = 12                     // Height of color picker header
+	MinColorPickerRows  = 5                      // Minimum visible color options
+	SessionListMaxItems = 8                      // Max visible items in session selector
+	PreviewLineCount    = 100                    // Number of lines to capture for preview
+	ScrollbackLines     = 1000                   // Number of lines for scroll history
+	GradientColorCount  = 15                     // Number of gradient options (for background exclusion)
+	PromptMinWidth      = 50                     // Minimum prompt input width
+	PromptMaxWidth      = 70                     // Maximum prompt input width
+	TickInterval        = 100 * time.Millisecond // UI refresh interval for selected
+	SlowTickInterval    = 500 * time.Millisecond // UI refresh interval for others
+	FavoritesGroupID    = "__favorites__"        // Virtual group ID for favorites
 )
 
 // state represents the current UI state
@@ -69,7 +69,7 @@ const (
 	stateList
 	stateNewName
 	stateNewPath
-	stateSelectAgentSession  // Selecting agent session to resume
+	stateSelectAgentSession // Selecting agent session to resume
 	stateConfirmDelete
 	stateConfirmStop          // Confirm session stop
 	stateConfirmDeleteProject // Confirm project deletion
@@ -80,34 +80,34 @@ const (
 	stateRenameProject // Renaming a project
 	stateHelp
 	stateColorPicker
-	statePrompt       // Send text to session
-	stateNewGroup     // Creating new group
-	stateRenameGroup  // Renaming a group
-	stateSelectGroup  // Assigning session to group
-	stateSelectAgent    // Selecting agent type for new session
-	stateCustomCmd      // Entering custom command
-	stateError          // Showing error overlay
-	stateConfirmUpdate  // Confirming update action
-	stateCheckingUpdate // Checking for updates
-	stateUpdating       // Downloading update
-	stateDownloadingDeb // Downloading .deb package for dpkg install
-	stateDownloadingRpm // Downloading .rpm package for rpm install
-	stateUpdateSuccess  // Showing successful update message
-	stateNotes          // Editing session notes
-	stateNewTabChoice   // Choosing between Agent or Terminal tab
-	stateNewTabAgent    // Selecting agent type for new tab
-	stateNewTab         // Creating new tmux tab/window with name
-	stateRenameTab        // Renaming tmux tab/window
-	stateDeleteChoice     // Choosing between deleting session or tab
-	stateConfirmDeleteTab // Confirming tab deletion
-	stateStopChoice       // Choosing between stopping session or tab
-	stateConfirmStopTab   // Confirming tab stop
-	stateResumeTabChoice  // Choosing which stopped tab to resume
-	stateConfirmYolo      // Confirming YOLO mode toggle
-	stateSearch              // Searching/filtering sessions
-	stateGlobalSearchLoading // Loading history for global search
-	stateGlobalSearch        // Global history search across all agents
-	stateForkDialog          // Fork session dialog (name + destination)
+	statePrompt                  // Send text to session
+	stateNewGroup                // Creating new group
+	stateRenameGroup             // Renaming a group
+	stateSelectGroup             // Assigning session to group
+	stateSelectAgent             // Selecting agent type for new session
+	stateCustomCmd               // Entering custom command
+	stateError                   // Showing error overlay
+	stateConfirmUpdate           // Confirming update action
+	stateCheckingUpdate          // Checking for updates
+	stateUpdating                // Downloading update
+	stateDownloadingDeb          // Downloading .deb package for dpkg install
+	stateDownloadingRpm          // Downloading .rpm package for rpm install
+	stateUpdateSuccess           // Showing successful update message
+	stateNotes                   // Editing session notes
+	stateNewTabChoice            // Choosing between Agent or Terminal tab
+	stateNewTabAgent             // Selecting agent type for new tab
+	stateNewTab                  // Creating new tmux tab/window with name
+	stateRenameTab               // Renaming tmux tab/window
+	stateDeleteChoice            // Choosing between deleting session or tab
+	stateConfirmDeleteTab        // Confirming tab deletion
+	stateStopChoice              // Choosing between stopping session or tab
+	stateConfirmStopTab          // Confirming tab stop
+	stateResumeTabChoice         // Choosing which stopped tab to resume
+	stateConfirmYolo             // Confirming YOLO mode toggle
+	stateSearch                  // Searching/filtering sessions
+	stateGlobalSearchLoading     // Loading history for global search
+	stateGlobalSearch            // Global history search across all agents
+	stateForkDialog              // Fork session dialog (name + destination)
 	stateGlobalSearchAction      // Action selection for global search result (open/new session/new tab)
 	stateGlobalSearchConfirmJump // Confirm jump to existing session
 	stateGlobalSearchNewName     // Entering name for new session from global search
@@ -121,86 +121,94 @@ const (
 // It manages multiple Claude Code instances, handles user input, and renders
 // the split-pane interface with session list and preview.
 type Model struct {
-	instances       []*session.Instance
-	storage         *session.Storage
-	cursor          int
-	state           state
-	width           int
-	height          int
-	nameInput       textinput.Model
-	pathInput       textinput.Model
-	promptInput     textarea.Model            // Textarea for sending multi-line text to session
-	promptSuggestion string                    // Autocomplete suggestion from agent
-	autoYes         bool
-	deleteTarget    *session.Instance
-	stopTarget      *session.Instance
-	yoloTarget      *session.Instance // Instance for YOLO confirmation
-	yoloWindowIndex int               // Window index for YOLO toggle (0 = main, >0 = tab)
-	yoloNewState    bool              // New YOLO state (true = enable, false = disable)
-	preview         string
-	err             error
-	successMsg      string                        // Success message to display
-	agentSessions       []session.AgentSession    // Agent sessions for current instance
-	resumeAgentType     session.AgentType         // Agent type for resume (active tab's agent)
-	resumeWindowIndex   int                       // Window index for resume (active tab's index)
-	sessionCursor       int                       // Cursor for Claude session selection
-	sessionGroupExpanded map[string]bool          // Tracks which project groups are expanded
-	sessionGroupedView  []sessionGroupItem        // Flattened list of groups and sessions for display
-	pendingInstance     *session.Instance         // Instance being created
-	isParallelSession   bool                      // True if creating parallel session (don't show resume)
-	parallelOriginalID  string                    // Original instance ID when creating parallel session
-	lastLines           map[string]string                   // Last output line for each instance (by ID)
-	prevContent        map[string]string                            // Previous content hash to detect activity
-	isActive           map[string]bool                              // Whether instance has recent activity
-	activityState      map[string]session.SessionActivity           // Activity state (idle/busy/waiting)
-	windowActivityState map[string]map[int]session.SessionActivity  // Window-level activity (session ID -> window index -> activity)
-	colorCursor     int                       // Cursor for color picker
-	colorMode       int                       // 0 = foreground, 1 = background
-	previewFg       string                    // Preview foreground color
-	previewBg       string                    // Preview background color
-	compactList     bool                      // No extra line between sessions
-	hideStatusLines bool                      // Hide last output line under sessions
-	showAgentIcons  bool                      // Show agent type icons in session list
-	splitView          bool                      // Split preview mode
-	markedSessionID    string                    // Session ID marked for split view
-	markedVisibleIndex int                       // Visual index for pinned navigation (handles duplicates)
-	splitFocus         int                       // 0 = selected (bottom), 1 = pinned (top)
-	groups             []*session.Group          // Session groups
-	favoritesCollapsed bool                      // Whether favorites group is collapsed
-	groupInput         textinput.Model           // Input for group name
-	groupCursor     int                       // Cursor for group selection
-	visibleItems    []visibleItem             // Flattened list of visible items (groups + sessions)
-	pendingGroupID  string                    // Group ID for new session creation
-	editingGroup    *session.Group            // Group being edited in color picker (nil = editing session)
-	agentCursor     int                       // Cursor for agent selection
-	pendingAgent    session.AgentType         // Agent type for new session
-	customCmdInput  textinput.Model           // Input for custom command
-	tickCount       int                       // Counter for slow tick (update others every 5th tick)
-	updateAvailable string                    // New version available (empty if up to date)
-	previewScroll   int                       // Preview scroll offset (0 = bottom, positive = scroll up)
-	scrollContent   string                    // Extended content for scrolling (fetched on demand)
-	helpScroll      int                       // Help view scroll offset (0 = top, positive = scroll down)
-	projects        []*session.Project        // Available projects
-	projectCursor   int                       // Cursor for project selection
-	activeProject   *session.Project          // Currently active project (nil = default)
-	projectInput    textinput.Model           // Input for project name
-	deleteProjectTarget *session.Project      // Project being deleted
-	importTarget        *session.Project      // Project to import sessions into
-	previousState       state                 // Previous state to return to from error dialog
-	notesInput          textarea.Model        // Textarea for editing session notes
-	notesWindowIndex    int                   // Window index for notes editing (-1 = session, >=0 = tab)
-	newTabIsAgent       bool                  // Whether new tab should run agent (true) or shell (false)
-	newTabAgent         session.AgentType     // Agent type for new tab
-	newTabAgentCursor   int                   // Cursor for agent selection in new tab dialog
+	instances            []*session.Instance
+	storage              *session.Storage
+	cursor               int
+	state                state
+	width                int
+	height               int
+	nameInput            textinput.Model
+	pathInput            textinput.Model
+	promptInput          textarea.Model // Textarea for sending multi-line text to session
+	promptSuggestion     string         // Autocomplete suggestion from agent
+	autoYes              bool
+	deleteTarget         *session.Instance
+	stopTarget           *session.Instance
+	yoloTarget           *session.Instance // Instance for YOLO confirmation
+	yoloWindowIndex      int               // tmux window index the YOLO toggle applies to
+	yoloNewState         bool              // New YOLO state (true = enable, false = disable)
+	preview              string
+	err                  error
+	successMsg           string                                     // Success message to display
+	agentSessions        []session.AgentSession                     // Agent sessions for current instance
+	resumeAgentType      session.AgentType                          // Agent type for resume (active tab's agent)
+	resumeWindowIndex    int                                        // Window index for resume (active tab's index)
+	sessionCursor        int                                        // Cursor for Claude session selection
+	sessionGroupExpanded map[string]bool                            // Tracks which project groups are expanded
+	sessionGroupedView   []sessionGroupItem                         // Flattened list of groups and sessions for display
+	pendingInstance      *session.Instance                          // Instance being created
+	isParallelSession    bool                                       // True if creating parallel session (don't show resume)
+	parallelOriginalID   string                                     // Original instance ID when creating parallel session
+	lastLines            map[string]string                          // Last output line for each instance (by ID)
+	prevContent          map[string]string                          // Previous content hash to detect activity
+	isActive             map[string]bool                            // Whether instance has recent activity
+	activityState        map[string]session.SessionActivity         // Activity state (idle/busy/waiting)
+	windowActivityState  map[string]map[int]session.SessionActivity // Window-level activity (session ID -> window index -> activity)
+	// mainWindowIndex is the agent's own window per session, recorded by the
+	// poll so rendering can look its activity up without asking tmux on every
+	// frame. Keyed by session ID; absent for a session that is not running.
+	mainWindowIndex map[string]int
+	// statusPollRunning stops a slow poll piling up behind itself: probing can
+	// take longer than a tick, and starting another would multiply the tmux
+	// load exactly when the system is already struggling.
+	statusPollRunning   bool
+	colorCursor         int                // Cursor for color picker
+	colorMode           int                // 0 = foreground, 1 = background
+	previewFg           string             // Preview foreground color
+	previewBg           string             // Preview background color
+	compactList         bool               // No extra line between sessions
+	hideStatusLines     bool               // Hide last output line under sessions
+	showAgentIcons      bool               // Show agent type icons in session list
+	splitView           bool               // Split preview mode
+	markedSessionID     string             // Session ID marked for split view
+	markedVisibleIndex  int                // Visual index for pinned navigation (handles duplicates)
+	splitFocus          int                // 0 = selected (bottom), 1 = pinned (top)
+	groups              []*session.Group   // Session groups
+	favoritesCollapsed  bool               // Whether favorites group is collapsed
+	groupInput          textinput.Model    // Input for group name
+	groupCursor         int                // Cursor for group selection
+	visibleItems        []visibleItem      // Flattened list of visible items (groups + sessions)
+	pendingGroupID      string             // Group ID for new session creation
+	editingGroup        *session.Group     // Group being edited in color picker (nil = editing session)
+	agentCursor         int                // Cursor for agent selection
+	pendingAgent        session.AgentType  // Agent type for new session
+	customCmdInput      textinput.Model    // Input for custom command
+	tickCount           int                // Counter for slow tick (update others every 5th tick)
+	updateAvailable     string             // New version available (empty if up to date)
+	previewScroll       int                // Preview scroll offset (0 = bottom, positive = scroll up)
+	scrollContent       string             // Extended content for scrolling (fetched on demand)
+	helpScroll          int                // Help view scroll offset (0 = top, positive = scroll down)
+	projects            []*session.Project // Available projects
+	projectCursor       int                // Cursor for project selection
+	activeProject       *session.Project   // Currently active project (nil = default)
+	projectInput        textinput.Model    // Input for project name
+	deleteProjectTarget *session.Project   // Project being deleted
+	importTarget        *session.Project   // Project to import sessions into
+	previousState       state              // Previous state to return to from error dialog
+	notesInput          textarea.Model     // Textarea for editing session notes
+	notesWindowIndex    int                // Window index for notes editing (-1 = session, >=0 = tab)
+	newTabIsAgent       bool               // Whether new tab should run agent (true) or shell (false)
+	newTabAgent         session.AgentType  // Agent type for new tab
+	newTabAgentCursor   int                // Cursor for agent selection in new tab dialog
 
 	// Diff pane
-	diffPane       *DiffPane // Diff display component
-	showDiff       bool      // Show diff tab instead of preview
+	diffPane *DiffPane // Diff display component
+	showDiff bool      // Show diff tab instead of preview
 
 	// Fork dialog
-	forkNameInput textinput.Model    // Input for fork name
-	forkToTab     bool               // true = fork to new tab, false = fork to new session
-	forkTarget    *session.Instance  // Session being forked
+	forkNameInput textinput.Model   // Input for fork name
+	forkToTab     bool              // true = fork to new tab, false = fork to new session
+	forkTarget    *session.Instance // Session being forked
 
 	// Search
 	searchInput  textinput.Model // Search input field
@@ -208,31 +216,31 @@ type Model struct {
 	searchActive bool            // Whether search filter is active
 
 	// Global Search (multi-agent history)
-	globalSearchInput          textinput.Model                  // Search input field
-	globalSearchResults        []session.HistoryEntry           // Search results
-	globalSearchCursor         int                              // Cursor in results list
-	globalSearchExpanded       int                              // Expanded result index (-1 = none)
-	historyIndex               *session.HistoryIndex            // History index for all agents
-	globalSearchConversation   []session.ConversationMessage    // Cached conversation for preview
-	globalSearchScroll         int                              // Scroll position in conversation preview
-	globalSearchLastCursor     int                              // Last cursor position (to detect changes)
-	globalSearchLastQuery      string                           // Last search query (for debounce)
-	globalSearchPendingQuery   string                           // Query waiting to be searched
-	globalSearchDebounceActive bool                             // Whether debounce timer is active
-	globalSearchConvLoading    bool                             // Whether conversation is loading
+	globalSearchInput          textinput.Model               // Search input field
+	globalSearchResults        []session.HistoryEntry        // Search results
+	globalSearchCursor         int                           // Cursor in results list
+	globalSearchExpanded       int                           // Expanded result index (-1 = none)
+	historyIndex               *session.HistoryIndex         // History index for all agents
+	globalSearchConversation   []session.ConversationMessage // Cached conversation for preview
+	globalSearchScroll         int                           // Scroll position in conversation preview
+	globalSearchLastCursor     int                           // Last cursor position (to detect changes)
+	globalSearchLastQuery      string                        // Last search query (for debounce)
+	globalSearchPendingQuery   string                        // Query waiting to be searched
+	globalSearchDebounceActive bool                          // Whether debounce timer is active
+	globalSearchConvLoading    bool                          // Whether conversation is loading
 
 	// Global search action dialog
-	globalSearchActionCursor    int                              // Cursor for action selection (0=new session, 1=to group, 2=as tab)
-	globalSearchSelectedEntry   *session.HistoryEntry            // Selected history entry for action
-	globalSearchMatchedSession  *session.Instance                // Matched session for confirm jump dialog
-	globalSearchMatchedTabIndex int                              // Matched tab index (-1 = main session, >=0 = tab index)
-	globalSearchMatches         []globalSearchMatch              // All matching sessions/tabs for selection
-	globalSearchMatchCursor     int                              // Cursor for match selection
+	globalSearchActionCursor    int                   // Cursor for action selection (0=new session, 1=to group, 2=as tab)
+	globalSearchSelectedEntry   *session.HistoryEntry // Selected history entry for action
+	globalSearchMatchedSession  *session.Instance     // Matched session for confirm jump dialog
+	globalSearchMatchedTabIndex int                   // Matched tab index (-1 = main session, >=0 = tab index)
+	globalSearchMatches         []globalSearchMatch   // All matching sessions/tabs for selection
+	globalSearchMatchCursor     int                   // Cursor for match selection
 
 	// Resume sync flag
-	pendingResumeSync    bool      // True when 'r' was pressed, triggers session ID sync on detach
-	resumeSyncTime       time.Time // Time when 'r' was pressed
-	resumeSyncWindowIdx  int       // Window index to sync (0 = main, >0 = tab index in FollowedWindows)
+	pendingResumeSync   bool      // True when 'r' was pressed, triggers session ID sync on detach
+	resumeSyncTime      time.Time // Time when 'r' was pressed
+	resumeSyncWindowIdx int       // Window index to sync (0 = main, >0 = tab index in FollowedWindows)
 
 	// Resume choice dialog
 	resumeTarget       *session.Instance // Target instance for resume
@@ -246,9 +254,9 @@ type Model struct {
 	newTabContinueExisting    bool // true = use resume picker after name input
 
 	// Resume stopped tab
-	resumeTabTarget       *session.Instance       // Target instance for resume tab
-	resumeTabStoppedTabs  []session.FollowedWindow // List of stopped tabs
-	resumeTabCursor       int                      // Cursor for selecting stopped tab
+	resumeTabTarget      *session.Instance        // Target instance for resume tab
+	resumeTabStoppedTabs []session.FollowedWindow // List of stopped tabs
+	resumeTabCursor      int                      // Cursor for selecting stopped tab
 }
 
 // globalSearchMatch represents a matched session/tab for selection
@@ -359,31 +367,32 @@ func NewModel() (Model, error) {
 	}
 
 	m := Model{
-		instances:       []*session.Instance{}, // Empty until project selected
-		storage:         storage,
-		state:           stateProjectSelect, // Start with project selection
-		nameInput:       nameInput,
-		pathInput:       pathInput,
-		promptInput:     promptInput,
-		groupInput:      groupInput,
-		customCmdInput:  customCmdInput,
-		projectInput:    projectInput,
-		notesInput:      notesInput,
-		searchInput:     searchInput,
-		globalSearchInput:   globalSearchInput,
+		instances:            []*session.Instance{}, // Empty until project selected
+		storage:              storage,
+		state:                stateProjectSelect, // Start with project selection
+		nameInput:            nameInput,
+		pathInput:            pathInput,
+		promptInput:          promptInput,
+		groupInput:           groupInput,
+		customCmdInput:       customCmdInput,
+		projectInput:         projectInput,
+		notesInput:           notesInput,
+		searchInput:          searchInput,
+		globalSearchInput:    globalSearchInput,
 		globalSearchExpanded: -1,
-		historyIndex:        session.NewHistoryIndex(),
-		forkNameInput:       forkNameInput,
-		projects:        projectsData.Projects,
-		projectCursor:   0,
-		groups:          []*session.Group{},
-		lastLines:           make(map[string]string),
-		prevContent:         make(map[string]string),
-		isActive:            make(map[string]bool),
-		activityState:       make(map[string]session.SessionActivity),
-		windowActivityState: make(map[string]map[int]session.SessionActivity),
-		diffPane:            NewDiffPane(),
-		updateAvailable:     updater.GetCachedAvailableUpdate(), // Load cached update
+		historyIndex:         session.NewHistoryIndex(),
+		forkNameInput:        forkNameInput,
+		projects:             projectsData.Projects,
+		projectCursor:        0,
+		groups:               []*session.Group{},
+		lastLines:            make(map[string]string),
+		prevContent:          make(map[string]string),
+		isActive:             make(map[string]bool),
+		activityState:        make(map[string]session.SessionActivity),
+		windowActivityState:  make(map[string]map[int]session.SessionActivity),
+		mainWindowIndex:      make(map[string]int),
+		diffPane:             NewDiffPane(),
+		updateAvailable:      updater.GetCachedAvailableUpdate(), // Load cached update
 	}
 
 	return m, nil
@@ -533,7 +542,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 				if newID != "" {
-					if m.resumeSyncWindowIdx == 0 {
+					if m.resumeSyncWindowIdx == m.mainWindowIndex[inst.ID] {
 						// Sync main session
 						if (inst.Agent == session.AgentClaude || inst.Agent == "") && newID != inst.ResumeSessionID {
 							inst.ResumeSessionID = newID
@@ -661,6 +670,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		}
+
+	case statusPollResultMsg:
+		m.statusPollRunning = false
+		m.applyStatusPoll(msg)
+		return m, nil
 
 	case tickMsg:
 		return m.handleTick()
@@ -831,45 +845,30 @@ func (m Model) handleTick() (tea.Model, tea.Cmd) {
 
 	selectedInst := m.getSelectedInstance()
 
-	// Update instance statuses and last lines
-	for _, inst := range m.instances {
-		// Only update non-selected instances on slow tick
-		isSelected := selectedInst != nil && inst.ID == selectedInst.ID
-		if !isSelected && !slowTick {
-			continue
+	// Probe the sessions off the UI thread.
+	//
+	// Every window costs a tmux capture, and a busy one costs a second capture
+	// after a 60ms sleep — the only way to tell a live spinner from one frozen
+	// in scrollback. Run inline, a handful of busy tabs spent longer sleeping
+	// than the tick interval itself, the queue never caught up, and the
+	// interface stopped answering the keyboard. statusPollCmd does the same
+	// work in a goroutine and posts the results back.
+	//
+	// Guarded so a slow poll cannot pile up behind itself: if the previous one
+	// is still running, this tick simply skips it.
+	var pollCmd tea.Cmd
+	if !m.statusPollRunning {
+		toPoll := make([]*session.Instance, 0, len(m.instances))
+		for _, inst := range m.instances {
+			// Non-selected sessions refresh at the slower cadence, as before.
+			isSelected := selectedInst != nil && inst.ID == selectedInst.ID
+			if isSelected || slowTick {
+				toPoll = append(toPoll, inst)
+			}
 		}
-
-		inst.UpdateStatus()
-		currentLine := inst.GetLastLine()
-		m.lastLines[inst.ID] = currentLine
-
-		// Detect activity by comparing with previous content
-		if inst.Status == session.StatusRunning {
-			prevLine := m.prevContent[inst.ID]
-			if currentLine != prevLine && prevLine != "" {
-				m.isActive[inst.ID] = true
-			} else {
-				m.isActive[inst.ID] = false
-			}
-			m.prevContent[inst.ID] = currentLine
-
-			// Detect detailed activity state (busy/waiting/idle) across all followed windows
-			m.activityState[inst.ID] = inst.DetectAggregatedActivity()
-
-			// Detect per-window activity for status line coloring
-			if m.windowActivityState[inst.ID] == nil {
-				m.windowActivityState[inst.ID] = make(map[int]session.SessionActivity)
-			}
-			// Main window (0)
-			m.windowActivityState[inst.ID][0] = inst.DetectActivityForWindow(0)
-			// Followed windows
-			for _, fw := range inst.FollowedWindows {
-				m.windowActivityState[inst.ID][fw.Index] = inst.DetectActivityForWindow(fw.Index)
-			}
-		} else {
-			m.isActive[inst.ID] = false
-			m.activityState[inst.ID] = session.ActivityIdle
-			m.windowActivityState[inst.ID] = nil
+		if len(toPoll) > 0 {
+			m.statusPollRunning = true
+			pollCmd = statusPollCmd(toPoll)
 		}
 	}
 
@@ -886,6 +885,9 @@ func (m Model) handleTick() (tea.Model, tea.Cmd) {
 		if m.showDiff && slowTick {
 			m.diffPane.SetDiff(selectedInst)
 		}
+	}
+	if pollCmd != nil {
+		return m, tea.Batch(tickCmd(), pollCmd)
 	}
 	return m, tickCmd()
 }

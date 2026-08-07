@@ -262,7 +262,10 @@ func (m Model) buildPreviewPane(contentHeight int) string {
 				}
 				// Only show activity indicator for non-terminal agents
 				if !isTerminal {
-					activity := inst.DetectActivityForWindow(w.Index)
+					// Read what the poll already worked out. Probing here ran
+					// a tmux capture — and a 60ms sleep for any busy pane —
+					// on every render of every tab.
+					activity := m.windowActivityState[inst.ID][w.Index]
 					switch activity {
 					case session.ActivityWaiting:
 						tabIndicator = waitingStyle.Render("● ")
