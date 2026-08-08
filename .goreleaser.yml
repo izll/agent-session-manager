@@ -74,3 +74,9 @@ release:
     name: agent-session-manager
   draft: false
   prerelease: auto
+  # Points at the CHANGELOG rather than repeating it: the generated list below
+  # is commit subjects, which say the same things in a different voice, and a
+  # reader should not have to reconcile two accounts of one release.
+  header: |
+    See [CHANGELOG.md](https://github.com/izll/agent-session-manager/blob/main/CHANGELOG.md)
+    for what changed in this release, described from a user's point of view.
