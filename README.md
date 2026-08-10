@@ -15,6 +15,12 @@
 
 ---
 
+> **Prefer a graphical app?** The same session manager exists as a desktop
+> application — [**ASMGR Desktop**](https://github.com/izll/agent-session-manager-desktop),
+> built with Wails and Svelte, with real terminals, a diff viewer, a file
+> browser and mobile push notifications. The two keep their sessions separately,
+> so you can run both.
+
 Inspired by [Claude Squad](https://github.com/smtg-ai/claude-squad).
 
 ## Supported AI Agents
