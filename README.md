@@ -67,7 +67,12 @@ Inspired by [Claude Squad](https://github.com/smtg-ai/claude-squad).
 
 ### Prerequisites
 
-- tmux
+- A terminal multiplexer:
+  - **Linux / macOS** — `tmux`
+  - **Windows** — [psmux](https://github.com/psmux/psmux), a native Windows
+    multiplexer that speaks tmux's command language; no WSL or MSYS2 needed.
+    Install with `winget install psmux`. Set `ASMGR_TMUX` if you would rather
+    point at tmux under WSL or Cygwin.
 - At least one AI CLI tool installed:
   - [Claude Code](https://github.com/anthropics/claude-code)
   - [Gemini CLI](https://github.com/google-gemini/gemini-cli)

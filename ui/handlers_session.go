@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -45,13 +44,13 @@ func configureTmuxStatusBarWithYolo(sessionName, instanceName, fgColor, bgColor 
 	target := sessionName + ":"
 
 	// Enable status bar
-	exec.Command("tmux", "set-option", "-t", target, "status", "on").Run()
+	session.TmuxCommand("set-option", "-t", target, "status", "on").Run()
 
 	// Status bar style - dark background
-	exec.Command("tmux", "set-option", "-t", target, "status-style", "bg=#1a1a2e,fg=#888888").Run()
+	session.TmuxCommand("set-option", "-t", target, "status-style", "bg=#1a1a2e,fg=#888888").Run()
 
 	// Get window list with names, index, active status, and dead status
-	windowListOutput, _ := exec.Command("tmux", "list-windows", "-t", sessionName, "-F", "#{window_index}:#{window_name}:#{window_active}:#{pane_dead}").Output()
+	windowListOutput, _ := session.TmuxCommand("list-windows", "-t", sessionName, "-F", "#{window_index}:#{window_name}:#{window_active}:#{pane_dead}").Output()
 	windowLines := strings.Split(strings.TrimSpace(string(windowListOutput)), "\n")
 
 	// Build status line with session name and tabs
@@ -105,30 +104,30 @@ func configureTmuxStatusBarWithYolo(sessionName, instanceName, fgColor, bgColor 
 	}
 
 	// Set status-left with our tab list
-	exec.Command("tmux", "set-option", "-t", target, "status-left", statusLeft.String()).Run()
-	exec.Command("tmux", "set-option", "-t", target, "status-left-length", "500").Run()
+	session.TmuxCommand("set-option", "-t", target, "status-left", statusLeft.String()).Run()
+	session.TmuxCommand("set-option", "-t", target, "status-left-length", "500").Run()
 
 	// Hide tmux's built-in window list
-	exec.Command("tmux", "set-option", "-t", target, "window-status-format", "").Run()
-	exec.Command("tmux", "set-option", "-t", target, "window-status-current-format", "").Run()
-	exec.Command("tmux", "set-option", "-t", target, "window-status-separator", "").Run()
+	session.TmuxCommand("set-option", "-t", target, "window-status-format", "").Run()
+	session.TmuxCommand("set-option", "-t", target, "window-status-current-format", "").Run()
+	session.TmuxCommand("set-option", "-t", target, "window-status-separator", "").Run()
 
 	// Use status-format to hide window list completely
 	statusFormat := fmt.Sprintf("#[align=left]%s#[align=right]#[fg=#555555]Alt+</>: tabs | Ctrl+Q: detach ", statusLeft.String())
-	exec.Command("tmux", "set-option", "-t", target, "status-format[0]", statusFormat).Run()
+	session.TmuxCommand("set-option", "-t", target, "status-format[0]", statusFormat).Run()
 
 	// Right side (backup, status-format overrides this)
-	exec.Command("tmux", "set-option", "-t", target, "status-right", "").Run()
+	session.TmuxCommand("set-option", "-t", target, "status-right", "").Run()
 
 	// Hook to refresh status bar when window changes
 	refreshCmd := fmt.Sprintf("asmgr refresh-status %s", sessionName)
-	exec.Command("tmux", "set-hook", "-t", sessionName, "window-linked", fmt.Sprintf("run-shell '%s'", refreshCmd)).Run()
-	exec.Command("tmux", "set-hook", "-t", sessionName, "window-unlinked", fmt.Sprintf("run-shell '%s'", refreshCmd)).Run()
-	exec.Command("tmux", "set-hook", "-t", sessionName, "session-window-changed", fmt.Sprintf("run-shell '%s'", refreshCmd)).Run()
+	session.TmuxCommand("set-hook", "-t", sessionName, "window-linked", fmt.Sprintf("run-shell '%s'", refreshCmd)).Run()
+	session.TmuxCommand("set-hook", "-t", sessionName, "window-unlinked", fmt.Sprintf("run-shell '%s'", refreshCmd)).Run()
+	session.TmuxCommand("set-hook", "-t", sessionName, "session-window-changed", fmt.Sprintf("run-shell '%s'", refreshCmd)).Run()
 
 	// Key bindings for tab switching (conditional - only in asmgr-* sessions)
-	exec.Command("tmux", "bind-key", "-n", "M-Left", "if-shell", "tmux display -p '#{session_name}' | grep -q '^asm_'", "previous-window", "").Run()
-	exec.Command("tmux", "bind-key", "-n", "M-Right", "if-shell", "tmux display -p '#{session_name}' | grep -q '^asm_'", "next-window", "").Run()
+	session.TmuxCommand("bind-key", "-n", "M-Left", "if-shell", "tmux display -p '#{session_name}' | grep -q '^asm_'", "previous-window", "").Run()
+	session.TmuxCommand("bind-key", "-n", "M-Right", "if-shell", "tmux display -p '#{session_name}' | grep -q '^asm_'", "next-window", "").Run()
 }
 
 // handleEnterSession starts (if needed) and attaches to the selected session
@@ -182,16 +181,16 @@ func (m *Model) handleEnterSession() tea.Cmd {
 	}
 	sessionName := inst.TmuxSessionName()
 	// Configure tmux for proper terminal resize following (ignore errors - non-critical)
-	exec.Command("tmux", "set-option", "-t", sessionName, "window-size", "largest").Run()
-	exec.Command("tmux", "set-option", "-t", sessionName, "aggressive-resize", "on").Run()
+	session.TmuxCommand("set-option", "-t", sessionName, "window-size", "largest").Run()
+	session.TmuxCommand("set-option", "-t", sessionName, "aggressive-resize", "on").Run()
 	// Enable focus events for hooks to work
-	exec.Command("tmux", "set-option", "-t", sessionName, "focus-events", "on").Run()
+	session.TmuxCommand("set-option", "-t", sessionName, "focus-events", "on").Run()
 	// Set up hook to resize window on focus gain (fixes Konsole tab switch issue)
-	exec.Command("tmux", "set-hook", "-t", sessionName, "client-focus-in", "resize-window -A").Run()
-	exec.Command("tmux", "set-hook", "-t", sessionName, "pane-focus-in", "resize-window -A").Run()
+	session.TmuxCommand("set-hook", "-t", sessionName, "client-focus-in", "resize-window -A").Run()
+	session.TmuxCommand("set-hook", "-t", sessionName, "pane-focus-in", "resize-window -A").Run()
 
 	// Update window 0 name to agent type (session name is shown in status bar)
-	exec.Command("tmux", "rename-window", "-t",
+	session.TmuxCommand("rename-window", "-t",
 		fmt.Sprintf("%s:%d", sessionName, inst.GetMainWindowIndex()), inst.WindowName()).Run()
 
 	// Configure tmux status bar to show tabs with per-window YOLO support
@@ -235,7 +234,7 @@ func (m *Model) handleEnterSession() tea.Cmd {
 		m.resumeSyncWindowIdx = syncWindowIdx
 	}
 
-	cmd := exec.Command("tmux", "attach-session", "-t", sessionName)
+	cmd := session.TmuxCommand("attach-session", "-t", sessionName)
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		return reattachMsg{}
 	})
@@ -508,7 +507,7 @@ func (m *Model) launchAgentResume(inst *session.Instance) tea.Cmd {
 
 		// Create tmux session
 		sessionName := inst.TmuxSessionName()
-		cmd := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "-c", inst.Path, startCmd)
+		cmd := session.TmuxCommand("new-session", "-d", "-s", sessionName, "-c", inst.Path, startCmd)
 		if err := cmd.Run(); err != nil {
 			m.err = fmt.Errorf("failed to create tmux session: %w", err)
 			m.previousState = stateList
@@ -520,18 +519,18 @@ func (m *Model) launchAgentResume(inst *session.Instance) tea.Cmd {
 		m.storage.UpdateInstance(inst)
 
 		// Configure tmux settings
-		exec.Command("tmux", "set-option", "-t", sessionName, "history-limit", "50000").Run()
-		exec.Command("tmux", "set-option", "-t", sessionName, "mouse", "on").Run()
-		exec.Command("tmux", "set-option", "-t", sessionName, "window-size", "latest").Run()
-		exec.Command("tmux", "set-option", "-t", sessionName, "aggressive-resize", "on").Run()
-		exec.Command("tmux", "rename-window", "-t",
+		session.TmuxCommand("set-option", "-t", sessionName, "history-limit", "50000").Run()
+		session.TmuxCommand("set-option", "-t", sessionName, "mouse", "on").Run()
+		session.TmuxCommand("set-option", "-t", sessionName, "window-size", "latest").Run()
+		session.TmuxCommand("set-option", "-t", sessionName, "aggressive-resize", "on").Run()
+		session.TmuxCommand("rename-window", "-t",
 			fmt.Sprintf("%s:%d", sessionName, inst.GetMainWindowIndex()), inst.WindowName()).Run()
 
 		// Configure status bar
 		RefreshTmuxStatusBarFull(sessionName, inst.Name, inst.Color, inst.BgColor, inst)
 
 		// Attach to the session
-		attachCmd := exec.Command("tmux", "attach-session", "-t", sessionName)
+		attachCmd := session.TmuxCommand("attach-session", "-t", sessionName)
 		return tea.ExecProcess(attachCmd, func(err error) tea.Msg {
 			return reattachMsg{}
 		})
@@ -549,11 +548,11 @@ func (m *Model) launchAgentResume(inst *session.Instance) tea.Cmd {
 	sessionName := inst.TmuxSessionName()
 
 	// First, clear any existing input (Ctrl+C + Ctrl+U)
-	exec.Command("tmux", "send-keys", "-t", sessionName, "C-c").Run()
-	exec.Command("tmux", "send-keys", "-t", sessionName, "C-u").Run()
+	session.TmuxCommand("send-keys", "-t", sessionName, "C-c").Run()
+	session.TmuxCommand("send-keys", "-t", sessionName, "C-u").Run()
 
 	// Send the resume command
-	if err := exec.Command("tmux", "send-keys", "-t", sessionName, resumeCmd, "Enter").Run(); err != nil {
+	if err := session.TmuxCommand("send-keys", "-t", sessionName, resumeCmd, "Enter").Run(); err != nil {
 		m.err = fmt.Errorf("failed to send resume command: %w", err)
 		m.previousState = stateList
 		m.state = stateError
@@ -561,7 +560,7 @@ func (m *Model) launchAgentResume(inst *session.Instance) tea.Cmd {
 	}
 
 	// Attach to the session
-	attachCmd := exec.Command("tmux", "attach-session", "-t", sessionName)
+	attachCmd := session.TmuxCommand("attach-session", "-t", sessionName)
 	return tea.ExecProcess(attachCmd, func(err error) tea.Msg {
 		return reattachMsg{}
 	})

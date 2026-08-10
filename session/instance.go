@@ -281,7 +281,7 @@ func (i *Instance) StartWithResume(resumeID string) error {
 	sessionName := i.TmuxSessionName()
 
 	// Check if tmux session already exists
-	checkCmd := exec.Command("tmux", "has-session", "-t", sessionName)
+	checkCmd := TmuxCommand("has-session", "-t", sessionName)
 	sessionExists := checkCmd.Run() == nil
 
 	if !sessionExists {
@@ -356,14 +356,14 @@ func (i *Instance) StartWithResume(resumeID string) error {
 		}
 
 		// Create new tmux session
-		cmd := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "-c", i.Path, agentCmd)
+		cmd := TmuxCommand("new-session", "-d", "-s", sessionName, "-c", i.Path, agentCmd)
 		if err := cmd.Run(); err != nil {
 			return fmt.Errorf("failed to create tmux session: %w", err)
 		}
 
 		// Wait for session to be ready
 		for j := 0; j < 20; j++ {
-			checkCmd := exec.Command("tmux", "has-session", "-t", sessionName)
+			checkCmd := TmuxCommand("has-session", "-t", sessionName)
 			if checkCmd.Run() == nil {
 				break
 			}
@@ -371,27 +371,44 @@ func (i *Instance) StartWithResume(resumeID string) error {
 		}
 
 		// Configure tmux session for better scrolling
-		exec.Command("tmux", "set-option", "-t", sessionName, "history-limit", "50000").Run()
-		exec.Command("tmux", "set-option", "-t", sessionName, "mouse", "on").Run()
+		TmuxCommand("set-option", "-t", sessionName, "history-limit", "50000").Run()
+		TmuxCommand("set-option", "-t", sessionName, "mouse", "on").Run()
 
 		// Use latest client size and aggressive resize for proper terminal following
-		exec.Command("tmux", "set-option", "-t", sessionName, "window-size", "latest").Run()
-		exec.Command("tmux", "set-option", "-t", sessionName, "aggressive-resize", "on").Run()
+		TmuxCommand("set-option", "-t", sessionName, "window-size", "latest").Run()
+		TmuxCommand("set-option", "-t", sessionName, "aggressive-resize", "on").Run()
 
 		// Enable xterm keys for Shift+PageUp/Down support
-		exec.Command("tmux", "set-option", "-t", sessionName, "-g", "xterm-keys", "on").Run()
+		TmuxCommand("set-option", "-t", sessionName, "-g", "xterm-keys", "on").Run()
 
 		// Set terminal overrides for better key support
-		exec.Command("tmux", "set-option", "-t", sessionName, "-ga", "terminal-overrides", ",xterm*:smcup@:rmcup@").Run()
+		TmuxCommand("set-option", "-t", sessionName, "-ga", "terminal-overrides", ",xterm*:smcup@:rmcup@").Run()
 
+		/**
+		 * Key bindings, and the one thing on Windows this does not cover.
+		 *
+		 * The conditional form runs a shell command through the multiplexer:
+		 * `tmux display … | grep -q` and `$(…)` are POSIX shell, and the binary
+		 * named inside is the literal string "tmux" rather than TmuxBinary().
+		 * Neither survives Windows, where the shell is not sh and the binary is
+		 * psmux.
+		 *
+		 * Left as they are on purpose. Rewriting them to name TmuxBinary()
+		 * would fix half of it and leave the shell pipeline broken, which reads
+		 * as working code that quietly does nothing. These bindings are a
+		 * convenience — Shift+PageUp scrolling and Ctrl+Y for YOLO — and the
+		 * app is fully usable without them; every command that matters goes
+		 * through TmuxCommand. Each Run() error is already discarded, so a
+		 * binding that will not register costs nothing beyond itself.
+		 */
 		// Bind Shift+PageUp/Down for scrolling in copy mode (conditional - only in asmgr-* sessions)
-		exec.Command("tmux", "bind-key", "-T", "root", "S-PageUp", "if-shell", "tmux display -p '#{session_name}' | grep -q '^asm_'", "copy-mode -eu", "").Run()
-		exec.Command("tmux", "bind-key", "-T", "root", "S-PageDown", "if-shell", "tmux display -p '#{session_name}' | grep -q '^asm_'", "send-keys PageDown", "").Run()
-		exec.Command("tmux", "bind-key", "-T", "copy-mode-vi", "S-PageUp", "if-shell", "tmux display -p '#{session_name}' | grep -q '^asm_'", "send-keys -X page-up", "").Run()
-		exec.Command("tmux", "bind-key", "-T", "copy-mode-vi", "S-PageDown", "if-shell", "tmux display -p '#{session_name}' | grep -q '^asm_'", "send-keys -X page-down", "").Run()
+		TmuxCommand("bind-key", "-T", "root", "S-PageUp", "if-shell", "tmux display -p '#{session_name}' | grep -q '^asm_'", "copy-mode -eu", "").Run()
+		TmuxCommand("bind-key", "-T", "root", "S-PageDown", "if-shell", "tmux display -p '#{session_name}' | grep -q '^asm_'", "send-keys PageDown", "").Run()
+		TmuxCommand("bind-key", "-T", "copy-mode-vi", "S-PageUp", "if-shell", "tmux display -p '#{session_name}' | grep -q '^asm_'", "send-keys -X page-up", "").Run()
+		TmuxCommand("bind-key", "-T", "copy-mode-vi", "S-PageDown", "if-shell", "tmux display -p '#{session_name}' | grep -q '^asm_'", "send-keys -X page-down", "").Run()
 
 		// Bind Ctrl+Y for yolo mode toggle (conditional - only in asmgr-* sessions)
-		exec.Command("tmux", "bind-key", "-n", "C-y", "if-shell", "tmux display -p '#{session_name}' | grep -q '^asm_'", `run-shell 'asmgr yolo "$(tmux display-message -p "#{session_name}")" "$(tmux display-message -p "#{window_index}")" 2>/dev/null'`, "").Run()
+		TmuxCommand("bind-key", "-n", "C-y", "if-shell", "tmux display -p '#{session_name}' | grep -q '^asm_'", `run-shell 'asmgr yolo "$(tmux display-message -p "#{session_name}")" "$(tmux display-message -p "#{window_index}")" 2>/dev/null'`, "").Run()
 
 		// Ctrl+q will be set up with resize in UpdateDetachBinding
 
@@ -401,8 +418,8 @@ func (i *Instance) StartWithResume(resumeID string) error {
 		// still be found after tmux stops renumbering around a closed one.
 		if mainWindowIdx, ok := soleTmuxWindowIndex(sessionName); ok {
 			mainTarget := fmt.Sprintf("%s:%d", sessionName, mainWindowIdx)
-			exec.Command("tmux", "set-option", "-w", "-t", mainTarget, "@asmgr_main", "1").Run()
-			exec.Command("tmux", "rename-window", "-t", mainTarget, i.WindowName()).Run()
+			TmuxCommand("set-option", "-w", "-t", mainTarget, "@asmgr_main", "1").Run()
+			TmuxCommand("rename-window", "-t", mainTarget, i.WindowName()).Run()
 		}
 
 		// Check if session is still alive after a short delay (detect immediate exit)
@@ -460,7 +477,7 @@ func (i *Instance) restoreFollowedWindows() {
 
 		if fw.Agent == AgentTerminal {
 			// Terminal window - just create empty shell
-			cmd = exec.Command("tmux", "new-window", "-t", sessionName, "-c", i.Path, "-n", fw.Name)
+			cmd = TmuxCommand("new-window", "-t", sessionName, "-c", i.Path, "-n", fw.Name)
 		} else {
 			// Agent window - build agent command
 			config := AgentConfigs[fw.Agent]
@@ -480,7 +497,7 @@ func (i *Instance) restoreFollowedWindows() {
 			}
 
 			// Create new window with agent command
-			cmd = exec.Command("tmux", "new-window", "-t", sessionName, "-c", i.Path, "-n", fw.Name, agentCmd)
+			cmd = TmuxCommand("new-window", "-t", sessionName, "-c", i.Path, "-n", fw.Name, agentCmd)
 		}
 
 		if err := cmd.Run(); err != nil {
@@ -492,9 +509,9 @@ func (i *Instance) restoreFollowedWindows() {
 
 		// Set remain-on-exit so window stays open when command exits (shows as stopped)
 		target := fmt.Sprintf("%s:%d", sessionName, newIdx)
-		exec.Command("tmux", "set-option", "-t", target, "remain-on-exit", "on").Run()
+		TmuxCommand("set-option", "-t", target, "remain-on-exit", "on").Run()
 		// Disable automatic-rename so the window keeps the user-specified name
-		exec.Command("tmux", "set-option", "-t", target, "automatic-rename", "off").Run()
+		TmuxCommand("set-option", "-t", target, "automatic-rename", "off").Run()
 
 		// Re-add to followed windows with updated index
 		i.FollowedWindows = append(i.FollowedWindows, FollowedWindow{
@@ -506,7 +523,7 @@ func (i *Instance) restoreFollowedWindows() {
 	}
 
 	// Switch back to window 0 (main agent)
-	exec.Command("tmux", "select-window", "-t",
+	TmuxCommand("select-window", "-t",
 		fmt.Sprintf("%s:%d", sessionName, i.GetMainWindowIndex())).Run()
 }
 
@@ -518,7 +535,7 @@ func (i *Instance) Stop() error {
 	}
 
 	sessionName := i.TmuxSessionName()
-	cmd := exec.Command("tmux", "kill-session", "-t", sessionName)
+	cmd := TmuxCommand("kill-session", "-t", sessionName)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to kill tmux session: %w", err)
 	}
@@ -535,7 +552,7 @@ func (i *Instance) Attach() error {
 	}
 
 	sessionName := i.TmuxSessionName()
-	cmd := exec.Command("tmux", "attach-session", "-t", sessionName)
+	cmd := TmuxCommand("attach-session", "-t", sessionName)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -550,7 +567,7 @@ func (i *Instance) NewWindow() error {
 	}
 
 	sessionName := i.TmuxSessionName()
-	cmd := exec.Command("tmux", "new-window", "-t", sessionName, "-c", i.Path)
+	cmd := TmuxCommand("new-window", "-t", sessionName, "-c", i.Path)
 	return cmd.Run()
 }
 
@@ -561,7 +578,7 @@ func (i *Instance) NewWindowWithName(name string) error {
 	}
 
 	sessionName := i.TmuxSessionName()
-	cmd := exec.Command("tmux", "new-window", "-t", sessionName, "-c", i.Path, "-n", name)
+	cmd := TmuxCommand("new-window", "-t", sessionName, "-c", i.Path, "-n", name)
 	if err := cmd.Run(); err != nil {
 		return err
 	}
@@ -576,9 +593,9 @@ func (i *Instance) NewWindowWithName(name string) error {
 
 	// Set remain-on-exit so window stays open when command exits (shows as stopped)
 	target := fmt.Sprintf("%s:%d", sessionName, newIdx)
-	exec.Command("tmux", "set-option", "-t", target, "remain-on-exit", "on").Run()
+	TmuxCommand("set-option", "-t", target, "remain-on-exit", "on").Run()
 	// Disable automatic-rename so the window keeps the user-specified name
-	exec.Command("tmux", "set-option", "-t", target, "automatic-rename", "off").Run()
+	TmuxCommand("set-option", "-t", target, "automatic-rename", "off").Run()
 
 	return nil
 }
@@ -660,7 +677,7 @@ func (i *Instance) RespawnWindow(windowIdx int) error {
 	}
 
 	if agentCmd != "" {
-		return exec.Command("tmux", "respawn-pane", "-k", "-t", target, agentCmd).Run()
+		return TmuxCommand("respawn-pane", "-k", "-t", target, agentCmd).Run()
 	}
 	if !windowKnown {
 		// Neither the main window nor a followed tab. Starting the default
@@ -669,7 +686,7 @@ func (i *Instance) RespawnWindow(windowIdx int) error {
 		return fmt.Errorf("no agent is tracked for window %d", windowIdx)
 	}
 	// A terminal tab: no command is correct, respawn-pane starts the shell.
-	return exec.Command("tmux", "respawn-pane", "-k", "-t", target).Run()
+	return TmuxCommand("respawn-pane", "-k", "-t", target).Run()
 }
 
 // RespawnWindowWithResume restarts a window's process with a specific resume session ID
@@ -755,7 +772,7 @@ func (i *Instance) RespawnWindowWithResume(windowIdx int, resumeID string) error
 	}
 
 	if agentCmd != "" {
-		return exec.Command("tmux", "respawn-pane", "-k", "-t", target, agentCmd).Run()
+		return TmuxCommand("respawn-pane", "-k", "-t", target, agentCmd).Run()
 	}
 	if !windowKnown {
 		// Neither the main window nor a followed tab. Starting the default
@@ -764,7 +781,7 @@ func (i *Instance) RespawnWindowWithResume(windowIdx int, resumeID string) error
 		return fmt.Errorf("no agent is tracked for window %d", windowIdx)
 	}
 	// A terminal tab: no command is correct, respawn-pane starts the shell.
-	return exec.Command("tmux", "respawn-pane", "-k", "-t", target).Run()
+	return TmuxCommand("respawn-pane", "-k", "-t", target).Run()
 }
 
 // StopWindow stops the agent in a tmux window by sending Ctrl+C twice
@@ -778,9 +795,9 @@ func (i *Instance) StopWindow(windowIdx int) error {
 	target := fmt.Sprintf("%s:%d", sessionName, windowIdx)
 
 	// Send Ctrl+C twice to stop the agent (Claude needs 2x)
-	exec.Command("tmux", "send-keys", "-t", target, "C-c").Run()
+	TmuxCommand("send-keys", "-t", target, "C-c").Run()
 	time.Sleep(100 * time.Millisecond)
-	exec.Command("tmux", "send-keys", "-t", target, "C-c").Run()
+	TmuxCommand("send-keys", "-t", target, "C-c").Run()
 
 	return nil
 }
@@ -808,7 +825,7 @@ func (i *Instance) ResumeStoppedTab(fwIndex int) (int, error) {
 	sessionName := i.TmuxSessionName()
 
 	// Create a new tmux window with the tab name
-	cmd := exec.Command("tmux", "new-window", "-t", sessionName, "-c", i.Path, "-n", fw.Name, "-P", "-F", "#{window_index}")
+	cmd := TmuxCommand("new-window", "-t", sessionName, "-c", i.Path, "-n", fw.Name, "-P", "-F", "#{window_index}")
 	output, err := cmd.Output()
 	if err != nil {
 		return 0, fmt.Errorf("failed to create window: %w", err)
@@ -823,7 +840,7 @@ func (i *Instance) ResumeStoppedTab(fwIndex int) (int, error) {
 
 	// Send the command to the new window
 	target := fmt.Sprintf("%s:%d", sessionName, newIdx)
-	exec.Command("tmux", "send-keys", "-t", target, agentCmd, "Enter").Run()
+	TmuxCommand("send-keys", "-t", target, agentCmd, "Enter").Run()
 
 	// Update the FollowedWindow
 	i.FollowedWindows[fwIdx].Index = newIdx
@@ -896,7 +913,7 @@ func (i *Instance) CloseWindow(windowIdx int) error {
 	if !tmuxWindowExists(sessionName, windowIdx) {
 		return fmt.Errorf("tmux window %s not found", target)
 	}
-	if err := exec.Command("tmux", "kill-window", "-t", target).Run(); err != nil {
+	if err := TmuxCommand("kill-window", "-t", target).Run(); err != nil {
 		return fmt.Errorf("failed to close window: %w", err)
 	}
 	// The window set just changed; a cached answer would name a window that is
@@ -924,7 +941,7 @@ func (i *Instance) GetWindowCount() int {
 	}
 
 	sessionName := i.TmuxSessionName()
-	cmd := exec.Command("tmux", "list-windows", "-t", sessionName)
+	cmd := TmuxCommand("list-windows", "-t", sessionName)
 	output, err := cmd.Output()
 	if err != nil {
 		return 0
@@ -945,7 +962,7 @@ func (i *Instance) GetCurrentWindowIndex() int {
 	}
 
 	sessionName := i.TmuxSessionName()
-	cmd := exec.Command("tmux", "display-message", "-t", sessionName, "-p", "#{window_index}")
+	cmd := TmuxCommand("display-message", "-t", sessionName, "-p", "#{window_index}")
 	output, err := cmd.Output()
 	if err != nil {
 		return 0
@@ -963,7 +980,7 @@ func (i *Instance) GetCurrentWindowName() string {
 	}
 
 	sessionName := i.TmuxSessionName()
-	cmd := exec.Command("tmux", "display-message", "-t", sessionName, "-p", "#{window_name}")
+	cmd := TmuxCommand("display-message", "-t", sessionName, "-p", "#{window_name}")
 	output, err := cmd.Output()
 	if err != nil {
 		return ""
@@ -979,7 +996,7 @@ func (i *Instance) SelectWindow(index int) error {
 	}
 
 	sessionName := i.TmuxSessionName()
-	cmd := exec.Command("tmux", "select-window", "-t", fmt.Sprintf("%s:%d", sessionName, index))
+	cmd := TmuxCommand("select-window", "-t", fmt.Sprintf("%s:%d", sessionName, index))
 	return cmd.Run()
 }
 
@@ -990,7 +1007,7 @@ func (i *Instance) NextWindow() error {
 	}
 
 	sessionName := i.TmuxSessionName()
-	cmd := exec.Command("tmux", "next-window", "-t", sessionName)
+	cmd := TmuxCommand("next-window", "-t", sessionName)
 	return cmd.Run()
 }
 
@@ -1001,7 +1018,7 @@ func (i *Instance) PrevWindow() error {
 	}
 
 	sessionName := i.TmuxSessionName()
-	cmd := exec.Command("tmux", "previous-window", "-t", sessionName)
+	cmd := TmuxCommand("previous-window", "-t", sessionName)
 	return cmd.Run()
 }
 
@@ -1012,7 +1029,7 @@ func (i *Instance) RenameCurrentWindow(name string) error {
 	}
 
 	sessionName := i.TmuxSessionName()
-	cmd := exec.Command("tmux", "rename-window", "-t", sessionName, name)
+	cmd := TmuxCommand("rename-window", "-t", sessionName, name)
 	return cmd.Run()
 }
 
@@ -1133,7 +1150,7 @@ func (i *Instance) GetWindowList() []WindowInfo {
 	// every window, and asking tmux per window turned one call into N.
 	mainWindowIdx := i.GetMainWindowIndex()
 	// Format: index:name:active_flag:pane_dead
-	cmd := exec.Command("tmux", "list-windows", "-t", sessionName, "-F", "#{window_index}:#{window_name}:#{window_active}:#{pane_dead}")
+	cmd := TmuxCommand("list-windows", "-t", sessionName, "-F", "#{window_index}:#{window_name}:#{window_active}:#{pane_dead}")
 	output, err := cmd.Output()
 	if err != nil {
 		return nil
@@ -1199,7 +1216,7 @@ func (i *Instance) NewAgentWindow(name string, agent AgentType, customCmd string
 	}
 
 	// Create new window with agent command
-	cmd := exec.Command("tmux", "new-window", "-t", sessionName, "-c", i.Path, "-n", name, agentCmd)
+	cmd := TmuxCommand("new-window", "-t", sessionName, "-c", i.Path, "-n", name, agentCmd)
 	if err := cmd.Run(); err != nil {
 		return -1, err
 	}
@@ -1217,9 +1234,9 @@ func (i *Instance) NewAgentWindow(name string, agent AgentType, customCmd string
 
 	// Set remain-on-exit so window stays open when command exits (shows as stopped)
 	target := fmt.Sprintf("%s:%d", sessionName, newIdx)
-	exec.Command("tmux", "set-option", "-t", target, "remain-on-exit", "on").Run()
+	TmuxCommand("set-option", "-t", target, "remain-on-exit", "on").Run()
 	// Disable automatic-rename so the window keeps the user-specified name
-	exec.Command("tmux", "set-option", "-t", target, "automatic-rename", "off").Run()
+	TmuxCommand("set-option", "-t", target, "automatic-rename", "off").Run()
 
 	return newIdx, nil
 }
@@ -1285,7 +1302,7 @@ func (i *Instance) NewForkedTab(name string, sessionID string) error {
 	agentCmd := config.Command + " " + strings.Join(args, " ")
 
 	// Create new window with forked agent
-	cmd := exec.Command("tmux", "new-window", "-t", sessionName, "-c", i.Path, "-n", name, agentCmd)
+	cmd := TmuxCommand("new-window", "-t", sessionName, "-c", i.Path, "-n", name, agentCmd)
 	if err := cmd.Run(); err != nil {
 		return err
 	}
@@ -1304,15 +1321,15 @@ func (i *Instance) NewForkedTab(name string, sessionID string) error {
 
 	// Set remain-on-exit so window stays open when command exits
 	target := fmt.Sprintf("%s:%d", sessionName, newIdx)
-	exec.Command("tmux", "set-option", "-t", target, "remain-on-exit", "on").Run()
-	exec.Command("tmux", "set-option", "-t", target, "automatic-rename", "off").Run()
+	TmuxCommand("set-option", "-t", target, "remain-on-exit", "on").Run()
+	TmuxCommand("set-option", "-t", target, "automatic-rename", "off").Run()
 
 	return nil
 }
 
 func (i *Instance) IsAlive() bool {
 	sessionName := i.TmuxSessionName()
-	cmd := exec.Command("tmux", "has-session", "-t", sessionName)
+	cmd := TmuxCommand("has-session", "-t", sessionName)
 	return cmd.Run() == nil
 }
 
@@ -1322,7 +1339,7 @@ func (i *Instance) ResizePane(width, height int) error {
 		return nil
 	}
 	sessionName := i.TmuxSessionName()
-	return exec.Command("tmux", "resize-window", "-t", sessionName, "-x", fmt.Sprintf("%d", width), "-y", fmt.Sprintf("%d", height)).Run()
+	return TmuxCommand("resize-window", "-t", sessionName, "-x", fmt.Sprintf("%d", width), "-y", fmt.Sprintf("%d", height)).Run()
 }
 
 // UpdateDetachBinding updates Ctrl+Q to resize to preview size before detaching
@@ -1333,7 +1350,7 @@ func (i *Instance) UpdateDetachBinding(previewWidth, previewHeight int) {
 	// Bind Ctrl+Q: conditional - only in asmgr-* sessions, with resize before detach
 	// Use if-shell for the condition check, then run-shell for the actual commands
 	resizeAndDetach := fmt.Sprintf("run-shell 'tmux resize-window -x %d -y %d 2>/dev/null; tmux detach-client'", previewWidth, previewHeight)
-	exec.Command("tmux", "bind-key", "-n", "C-q", "if-shell", "tmux display -p '#{session_name}' | grep -q '^asm_'", resizeAndDetach, "").Run()
+	TmuxCommand("bind-key", "-n", "C-q", "if-shell", "tmux display -p '#{session_name}' | grep -q '^asm_'", resizeAndDetach, "").Run()
 }
 
 func (i *Instance) GetPreview(lines int) (string, error) {
@@ -1347,7 +1364,7 @@ func (i *Instance) GetPreview(lines int) (string, error) {
 	// -S -lines means start from 'lines' back in history
 	// -e preserves colors, -J joins wrapped lines
 	startLine := fmt.Sprintf("-%d", lines)
-	cmd := exec.Command("tmux", "capture-pane", "-t", sessionName, "-p", "-e", "-J", "-S", startLine)
+	cmd := TmuxCommand("capture-pane", "-t", sessionName, "-p", "-e", "-J", "-S", startLine)
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("failed to capture pane: %w", err)
@@ -1415,7 +1432,7 @@ func (i *Instance) GetLastLine() string {
 	target := fmt.Sprintf("%s:%d", sessionName, i.GetMainWindowIndex())
 	// Capture last 50 lines with colors (-e flag preserves ANSI escape sequences)
 	// -J flag joins wrapped lines (prevents terminal width wrapping issues)
-	cmd := exec.Command("tmux", "capture-pane", "-t", target, "-p", "-e", "-J", "-S", "-50")
+	cmd := TmuxCommand("capture-pane", "-t", target, "-p", "-e", "-J", "-S", "-50")
 	output, err := cmd.Output()
 	if err != nil {
 		return "..."
@@ -1472,7 +1489,7 @@ func (i *Instance) GetLastLineForWindow(windowIdx int, agent AgentType) string {
 
 	sessionName := i.TmuxSessionName()
 	target := fmt.Sprintf("%s:%d", sessionName, windowIdx)
-	cmd := exec.Command("tmux", "capture-pane", "-t", target, "-p", "-e", "-J", "-S", "-50")
+	cmd := TmuxCommand("capture-pane", "-t", target, "-p", "-e", "-J", "-S", "-50")
 	output, err := cmd.Output()
 	if err != nil {
 		return "..."
@@ -1524,7 +1541,7 @@ func (i *Instance) SendKeys(keys string) error {
 	}
 
 	sessionName := i.TmuxSessionName()
-	cmd := exec.Command("tmux", "send-keys", "-t", sessionName, keys)
+	cmd := TmuxCommand("send-keys", "-t", sessionName, keys)
 	return cmd.Run()
 }
 
@@ -1536,7 +1553,7 @@ func (i *Instance) SendText(text string) error {
 
 	sessionName := i.TmuxSessionName()
 	// Use -l flag to send text literally without interpreting key names
-	cmd := exec.Command("tmux", "send-keys", "-l", "-t", sessionName, text)
+	cmd := TmuxCommand("send-keys", "-l", "-t", sessionName, text)
 	return cmd.Run()
 }
 
@@ -1549,7 +1566,7 @@ func (i *Instance) SendPrompt(text string) error {
 	sessionName := i.TmuxSessionName()
 
 	// First send text literally with -l flag to avoid key interpretation
-	cmd := exec.Command("tmux", "send-keys", "-l", "-t", sessionName, text)
+	cmd := TmuxCommand("send-keys", "-l", "-t", sessionName, text)
 	if err := cmd.Run(); err != nil {
 		return err
 	}
@@ -1558,7 +1575,7 @@ func (i *Instance) SendPrompt(text string) error {
 	time.Sleep(50 * time.Millisecond)
 
 	// Then send Enter separately
-	cmd = exec.Command("tmux", "send-keys", "-t", sessionName, "Enter")
+	cmd = TmuxCommand("send-keys", "-t", sessionName, "Enter")
 	return cmd.Run()
 }
 

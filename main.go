@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -81,6 +80,25 @@ func main() {
 			}
 			return
 		}
+	}
+
+	// An escape hatch for an unusual setup: tmux under WSL or Cygwin, a psmux
+	// that is not on PATH, or a build of either kept somewhere specific. There
+	// is no settings screen to put this in, and without it such a setup has no
+	// way to be expressed at all.
+	session.SetTmuxBinary(os.Getenv("ASMGR_TMUX"))
+
+	// Every session this app creates lives in a terminal multiplexer, so a
+	// missing one is not a degraded mode — it is the app unable to do the only
+	// thing it does. Said once, plainly, before the interface appears: without
+	// it each of the ~120 calls fails on its own terms, and the user gets a
+	// working-looking screen where nothing they do has any effect.
+	//
+	// This matters most on Windows, where the binary is psmux rather than tmux
+	// and is unlikely to be installed already.
+	if err := session.CheckMultiplexer(); err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(1)
 	}
 
 	// Refresh the detection patterns in the background. They are what tells
@@ -276,14 +294,14 @@ func toggleYolo(tmuxSessionName, windowIndex string) error {
 
 	// Terminal windows don't support YOLO
 	if agentType == session.AgentTerminal {
-		exec.Command("tmux", "display-message", "-t", tmuxSessionName, "Terminal windows don't support YOLO mode").Run()
+		session.TmuxCommand("display-message", "-t", tmuxSessionName, "Terminal windows don't support YOLO mode").Run()
 		return nil
 	}
 
 	// Check if agent supports AutoYes
 	config := session.AgentConfigs[agentType]
 	if !config.SupportsAutoYes {
-		exec.Command("tmux", "display-message", "-t", tmuxSessionName, fmt.Sprintf("YOLO mode not supported for %s", agentType)).Run()
+		session.TmuxCommand("display-message", "-t", tmuxSessionName, fmt.Sprintf("YOLO mode not supported for %s", agentType)).Run()
 		return nil
 	}
 
@@ -301,7 +319,7 @@ func toggleYolo(tmuxSessionName, windowIndex string) error {
 
 	// Show tmux menu for confirmation
 	confirmCmd := fmt.Sprintf("asmgr yolo-confirm %s %s %s", tmuxSessionName, windowIndex, newState)
-	exec.Command("tmux", "display-menu", "-t", tmuxSessionName,
+	session.TmuxCommand("display-menu", "-t", tmuxSessionName,
 		"-T", fmt.Sprintf(" %s ", menuTitle),
 		fmt.Sprintf(" %s ", menuAction), "", fmt.Sprintf("run-shell '%s'", confirmCmd),
 		" Cancel ", "", "",
@@ -407,7 +425,7 @@ func confirmYolo(tmuxSessionName, windowIndex string, enableYolo bool) error {
 	// Respawn the pane with new command
 	target := fmt.Sprintf("%s:%s", tmuxSessionName, windowIndex)
 	cmdStr := strings.Join(args, " ")
-	exec.Command("tmux", "respawn-pane", "-t", target, "-k", cmdStr).Run()
+	session.TmuxCommand("respawn-pane", "-t", target, "-k", cmdStr).Run()
 
 	// Refresh status bar
 	refreshStatusBar(tmuxSessionName)
@@ -417,7 +435,7 @@ func confirmYolo(tmuxSessionName, windowIndex string, enableYolo bool) error {
 	if enableYolo {
 		status = "ON"
 	}
-	exec.Command("tmux", "display-message", "-t", tmuxSessionName, fmt.Sprintf("YOLO mode %s for window %s", status, windowIndex)).Run()
+	session.TmuxCommand("display-message", "-t", tmuxSessionName, fmt.Sprintf("YOLO mode %s for window %s", status, windowIndex)).Run()
 
 	return nil
 }

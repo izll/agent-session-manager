@@ -2,7 +2,6 @@ package session
 
 import (
 	"fmt"
-	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -82,7 +81,7 @@ func (i *Instance) getMainWindowIndex() (int, bool) {
 		}
 	}
 
-	output, err := exec.Command("tmux", "list-windows", "-t", sessionName,
+	output, err := TmuxCommand("list-windows", "-t", sessionName,
 		"-F", "#{window_index}\t#{@asmgr_main}").Output()
 	if err != nil {
 		return rememberMainWindow(sessionName, 0, false)
@@ -100,7 +99,7 @@ func (i *Instance) getMainWindowIndex() (int, bool) {
 	// refuses to choose and features that need it stop working.
 	if !anyMarked {
 		target := fmt.Sprintf("%s:%d", sessionName, index)
-		_ = exec.Command("tmux", "set-option", "-w", "-t", target, "@asmgr_main", "1").Run()
+		_ = TmuxCommand("set-option", "-w", "-t", target, "@asmgr_main", "1").Run()
 	}
 	return rememberMainWindow(sessionName, index, true)
 }
@@ -186,7 +185,7 @@ func identifyMainWindow(output []byte, followedWindows []FollowedWindow) (index 
 // index does not fail — it destroys whatever the user is looking at, which is
 // usually the agent.
 func tmuxWindowExists(sessionName string, windowIdx int) bool {
-	output, err := exec.Command("tmux", "list-windows", "-t", sessionName,
+	output, err := TmuxCommand("list-windows", "-t", sessionName,
 		"-F", "#{window_index}").Output()
 	if err != nil {
 		return false
@@ -212,7 +211,7 @@ func tmuxWindowIndexListed(output []byte, windowIdx int) bool {
 // agent's, whatever number base-index gave it. Refuses when there is more than
 // one, rather than marking the wrong window as main.
 func soleTmuxWindowIndex(sessionName string) (int, bool) {
-	output, err := exec.Command("tmux", "list-windows", "-t", sessionName,
+	output, err := TmuxCommand("list-windows", "-t", sessionName,
 		"-F", "#{window_index}").Output()
 	if err != nil {
 		return 0, false

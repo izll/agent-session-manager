@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -22,9 +21,9 @@ import (
 type HistoryEntry struct {
 	ID          string
 	Agent       AgentType
-	Content     string    // Full conversation or command (for search)
-	Snippet     string    // Highlighted excerpt for display
-	Path        string    // Project path (if applicable)
+	Content     string // Full conversation or command (for search)
+	Snippet     string // Highlighted excerpt for display
+	Path        string // Project path (if applicable)
 	Timestamp   time.Time
 	Score       int    // Relevance score for sorting
 	SessionFile string // Full path to session file (for Claude - to load conversation)
@@ -345,8 +344,8 @@ type claudeSessionEntry struct {
 
 // claudeContentBlock represents a content block in assistant messages
 type claudeContentBlock struct {
-	Type    string `json:"type"`
-	Text    string `json:"text,omitempty"`
+	Type     string `json:"type"`
+	Text     string `json:"text,omitempty"`
 	Thinking string `json:"thinking,omitempty"`
 }
 
@@ -879,7 +878,7 @@ func (h *HistoryIndex) parseTerminalHistory() []HistoryEntry {
 
 // captureTerminalPane captures the scrollback buffer from a tmux pane
 func captureTerminalPane(target string, lines int) (string, error) {
-	cmd := exec.Command("tmux", "capture-pane", "-t", target, "-p", "-S", fmt.Sprintf("-%d", lines))
+	cmd := TmuxCommand("capture-pane", "-t", target, "-p", "-S", fmt.Sprintf("-%d", lines))
 	output, err := cmd.Output()
 	if err != nil {
 		return "", err

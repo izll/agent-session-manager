@@ -1035,7 +1035,7 @@ func (m Model) handleNewTabKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					resumeCmd := config.Command + " " + config.ResumeFlag
 
 					// Create new window with resume picker
-					cmd := exec.Command("tmux", "new-window", "-t", sessionName, "-c", inst.Path, "-n", name, resumeCmd)
+					cmd := session.TmuxCommand("new-window", "-t", sessionName, "-c", inst.Path, "-n", name, resumeCmd)
 					if err := cmd.Run(); err != nil {
 						m.err = fmt.Errorf("failed to create resume tab: %w", err)
 						m.previousState = stateList
@@ -1049,7 +1049,7 @@ func (m Model) handleNewTabKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 					// Set remain-on-exit so window stays open when command exits
 					target := fmt.Sprintf("%s:%d", sessionName, newWindowIdx)
-					exec.Command("tmux", "set-option", "-t", target, "remain-on-exit", "on").Run()
+					session.TmuxCommand("set-option", "-t", target, "remain-on-exit", "on").Run()
 
 					// Track as followed window
 					inst.FollowedWindows = append(inst.FollowedWindows, session.FollowedWindow{
@@ -1069,7 +1069,7 @@ func (m Model) handleNewTabKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 					m.newTabContinueExisting = false
 					m.state = stateList
-					attachCmd := exec.Command("tmux", "attach-session", "-t", sessionName)
+					attachCmd := session.TmuxCommand("attach-session", "-t", sessionName)
 					return m, tea.ExecProcess(attachCmd, func(err error) tea.Msg {
 						return reattachMsg{}
 					})
@@ -1320,7 +1320,7 @@ func (m Model) handleResumeTabChoiceKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.storage.UpdateInstance(m.resumeTabTarget)
 				// Switch to the new window
 				sessionName := m.resumeTabTarget.TmuxSessionName()
-				exec.Command("tmux", "select-window", "-t", fmt.Sprintf("%s:%d", sessionName, newIdx)).Run()
+				session.TmuxCommand("select-window", "-t", fmt.Sprintf("%s:%d", sessionName, newIdx)).Run()
 			}
 		}
 		m.resumeTabTarget = nil
@@ -2410,7 +2410,7 @@ func (m Model) handleResumeChoiceKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					if inst.AutoYes && config.SupportsAutoYes && config.AutoYesFlag != "" {
 						resumeCmd = resumeCmd + " " + config.AutoYesFlag
 					}
-					exec.Command("tmux", "respawn-pane", "-t", target, "-k", resumeCmd).Run()
+					session.TmuxCommand("respawn-pane", "-t", target, "-k", resumeCmd).Run()
 
 					// Clear main session ID since we're picking new one
 					inst.ResumeSessionID = ""
@@ -2422,7 +2422,7 @@ func (m Model) handleResumeChoiceKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 					m.resumeTarget = nil
 					m.state = stateList
-					attachCmd := exec.Command("tmux", "attach-session", "-t", sessionName)
+					attachCmd := session.TmuxCommand("attach-session", "-t", sessionName)
 					return m, tea.ExecProcess(attachCmd, func(err error) tea.Msg {
 						return reattachMsg{}
 					})
@@ -2442,7 +2442,7 @@ func (m Model) handleResumeChoiceKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					}
 
 					// Kill the window
-					exec.Command("tmux", "kill-window", "-t", target).Run()
+					session.TmuxCommand("kill-window", "-t", target).Run()
 
 					// Remove from FollowedWindows
 					if oldFwIdx >= 0 {
@@ -2451,7 +2451,7 @@ func (m Model) handleResumeChoiceKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 					// Create new window with resume picker
 					resumeCmd := config.Command + " " + config.ResumeFlag
-					cmd := exec.Command("tmux", "new-window", "-t", sessionName, "-c", inst.Path, "-n", oldName, resumeCmd)
+					cmd := session.TmuxCommand("new-window", "-t", sessionName, "-c", inst.Path, "-n", oldName, resumeCmd)
 					cmd.Run()
 
 					// Get new window index
@@ -2459,7 +2459,7 @@ func (m Model) handleResumeChoiceKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 					// Set remain-on-exit
 					newTarget := fmt.Sprintf("%s:%d", sessionName, newWindowIdx)
-					exec.Command("tmux", "set-option", "-t", newTarget, "remain-on-exit", "on").Run()
+					session.TmuxCommand("set-option", "-t", newTarget, "remain-on-exit", "on").Run()
 
 					// Add to FollowedWindows
 					agentType := inst.Agent
@@ -2481,7 +2481,7 @@ func (m Model) handleResumeChoiceKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 					m.resumeTarget = nil
 					m.state = stateList
-					attachCmd := exec.Command("tmux", "attach-session", "-t", sessionName)
+					attachCmd := session.TmuxCommand("attach-session", "-t", sessionName)
 					return m, tea.ExecProcess(attachCmd, func(err error) tea.Msg {
 						return reattachMsg{}
 					})
