@@ -33,6 +33,11 @@ jobs:
           git tag -a ${{ github.event.inputs.version }} -m "Release ${{ github.event.inputs.version }}" || true
           git push origin ${{ github.event.inputs.version }} || true
 
+      # Cross-compiles the Windows installer from Linux. NSIS is in Ubuntu's
+      # archive, so this needs no Windows runner.
+      - name: Install NSIS
+        run: sudo apt-get update && sudo apt-get install -y nsis
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
@@ -42,3 +47,43 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      # Built after GoReleaser, from the binaries it produced, and uploaded to
+      # the release it created.
+      #
+      # asmgr is a command-line tool, so a zip on its own leaves the user to
+      # put it somewhere and edit their PATH. The installer does that, and
+      # offers to install psmux — without which the app starts and then cannot
+      # do anything at all.
+      - name: Build Windows installers
+        run: |
+          set -euo pipefail
+          version="${{ github.event.inputs.version }}"
+          version="${version#v}"
+
+          for arch in amd64 arm64; do
+            exe=$(find dist -name asmgr.exe -path "*windows_${arch}*" | head -1)
+            if [ -z "$exe" ]; then
+              echo "no windows/${arch} binary in dist — skipping its installer"
+              continue
+            fi
+            mkdir -p dist
+            cp "$exe" build/windows/asmgr.exe
+            makensis -V2 \
+              "-DVERSION=${version}" \
+              "-DARCH=${arch}" \
+              build/windows/installer.nsi
+            rm -f build/windows/asmgr.exe
+          done
+
+          ls -la dist/*_setup.exe
+
+      - name: Attach installers to the release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          for f in dist/*_setup.exe; do
+            sha256sum "$f" | awk '{print $1}' > "$f.sha256"
+            gh release upload "${{ github.event.inputs.version }}" "$f" "$f.sha256" --clobber
+          done

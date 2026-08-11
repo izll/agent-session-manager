@@ -71,8 +71,12 @@ Inspired by [Claude Squad](https://github.com/smtg-ai/claude-squad).
   - **Linux / macOS** — `tmux`
   - **Windows** — [psmux](https://github.com/psmux/psmux), a native Windows
     multiplexer that speaks tmux's command language; no WSL or MSYS2 needed.
-    Install with `winget install psmux`. Set `ASMGR_TMUX` if you would rather
-    point at tmux under WSL or Cygwin.
+    The Windows installer offers to install it for you where winget is
+    available, which is Windows 11 and Windows 10 1809+ — Server, LTSC and
+    Sandbox editions have no Store and therefore no winget, so there
+    [download psmux](https://github.com/psmux/psmux/releases) and put it on
+    your PATH. Set `ASMGR_TMUX` to an absolute path if you would rather point
+    at tmux under WSL or Cygwin.
 - At least one AI CLI tool installed:
   - [Claude Code](https://github.com/anthropics/claude-code)
   - [Gemini CLI](https://github.com/google-gemini/gemini-cli)
@@ -92,6 +96,16 @@ Update:
 ```bash
 brew upgrade asmgr
 ```
+
+### Windows
+
+Download `asmgr_<version>_windows_amd64_setup.exe` from the
+[releases](https://github.com/izll/agent-session-manager/releases) and run it.
+It installs per-user (no administrator prompt), puts `asmgr` on your PATH, and
+offers to install psmux for you if it is missing.
+
+Open a **new** terminal afterwards — one already running will not have picked
+up the new PATH.
 
 ### Quick Install Script (Linux)
 

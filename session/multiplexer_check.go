@@ -29,8 +29,17 @@ import (
 func MultiplexerInstallHint() string {
 	switch runtime.GOOS {
 	case "windows":
-		return "winget install psmux, choco install psmux, or download it from " +
-			"https://github.com/psmux/psmux/releases and put it on your PATH"
+		// The full package id, not the name: `winget search psmux` also lists
+		// psmux.TerminalMap, and winget will happily install that instead.
+		//
+		// The download is named as well as the winget line, because winget is
+		// not everywhere: it ships with Windows 11 and with Windows 10 1809+
+		// through the Store's App Installer, but Server, LTSC and Sandbox
+		// editions have no Store and so no winget. Telling those users to run
+		// a command they do not have would leave them stuck.
+		return "winget install --id marlocarlo.psmux — or, if you have no " +
+			"winget, download it from https://github.com/psmux/psmux/releases " +
+			"and put it on your PATH"
 	case "darwin":
 		return "brew install tmux"
 	default:
