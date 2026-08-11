@@ -10,6 +10,24 @@ This file was started at 0.8.0. Earlier releases are summarised from their
 commits and are shorter for that reason, not smaller. Point releases that only
 carried a fix or two are folded into the version above them.
 
+## 0.9.0 — 2026-08-11
+
+### Added
+
+- **Windows works.** The Windows build was published and could not run: tmux
+  has no Windows build, and every call named it directly, so the binary started
+  and then failed at each one — silently, because nothing checked whether the
+  multiplexer was there at all. It now uses [psmux](https://github.com/psmux/psmux),
+  a native Windows multiplexer that speaks tmux's command language, and says
+  plainly what is missing before the interface appears rather than letting the
+  failures pile up out of sight.
+- **A Windows installer**, replacing the bare zip. It installs per-user with no
+  administrator prompt, puts `asmgr` on your PATH, and offers to install psmux
+  where winget is available — pointing at the download instead where it is not,
+  as on Server, LTSC and Sandbox editions, which have no Store.
+- **`ASMGR_TMUX`** names the multiplexer binary yourself, for tmux under WSL or
+  Cygwin, or a copy kept somewhere unusual.
+
 ## 0.8.0 — 2026-08-08
 
 ### Added
