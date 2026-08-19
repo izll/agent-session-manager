@@ -509,9 +509,9 @@ func (i *Instance) restoreFollowedWindows() {
 
 		// Set remain-on-exit so window stays open when command exits (shows as stopped)
 		target := fmt.Sprintf("%s:%d", sessionName, newIdx)
-		TmuxCommand("set-option", "-t", target, "remain-on-exit", "on").Run()
+		TmuxCommand("set-option", "-w", "-t", target, "remain-on-exit", "on").Run()
 		// Disable automatic-rename so the window keeps the user-specified name
-		TmuxCommand("set-option", "-t", target, "automatic-rename", "off").Run()
+		TmuxCommand("set-option", "-w", "-t", target, "automatic-rename", "off").Run()
 
 		// Re-add to followed windows with updated index
 		i.FollowedWindows = append(i.FollowedWindows, FollowedWindow{
@@ -593,9 +593,9 @@ func (i *Instance) NewWindowWithName(name string) error {
 
 	// Set remain-on-exit so window stays open when command exits (shows as stopped)
 	target := fmt.Sprintf("%s:%d", sessionName, newIdx)
-	TmuxCommand("set-option", "-t", target, "remain-on-exit", "on").Run()
+	TmuxCommand("set-option", "-w", "-t", target, "remain-on-exit", "on").Run()
 	// Disable automatic-rename so the window keeps the user-specified name
-	TmuxCommand("set-option", "-t", target, "automatic-rename", "off").Run()
+	TmuxCommand("set-option", "-w", "-t", target, "automatic-rename", "off").Run()
 
 	return nil
 }
@@ -1234,9 +1234,9 @@ func (i *Instance) NewAgentWindow(name string, agent AgentType, customCmd string
 
 	// Set remain-on-exit so window stays open when command exits (shows as stopped)
 	target := fmt.Sprintf("%s:%d", sessionName, newIdx)
-	TmuxCommand("set-option", "-t", target, "remain-on-exit", "on").Run()
+	TmuxCommand("set-option", "-w", "-t", target, "remain-on-exit", "on").Run()
 	// Disable automatic-rename so the window keeps the user-specified name
-	TmuxCommand("set-option", "-t", target, "automatic-rename", "off").Run()
+	TmuxCommand("set-option", "-w", "-t", target, "automatic-rename", "off").Run()
 
 	return newIdx, nil
 }
@@ -1321,8 +1321,8 @@ func (i *Instance) NewForkedTab(name string, sessionID string) error {
 
 	// Set remain-on-exit so window stays open when command exits
 	target := fmt.Sprintf("%s:%d", sessionName, newIdx)
-	TmuxCommand("set-option", "-t", target, "remain-on-exit", "on").Run()
-	TmuxCommand("set-option", "-t", target, "automatic-rename", "off").Run()
+	TmuxCommand("set-option", "-w", "-t", target, "remain-on-exit", "on").Run()
+	TmuxCommand("set-option", "-w", "-t", target, "automatic-rename", "off").Run()
 
 	return nil
 }
