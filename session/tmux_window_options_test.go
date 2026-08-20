@@ -7,11 +7,16 @@ import (
 	"testing"
 )
 
-// remain-on-exit and automatic-rename are WINDOW options, and tmux needs -w.
+// remain-on-exit and automatic-rename are WINDOW options, and every call says so
+// with -w.
 //
-// Without it the option lands on the session, where neither exists. tmux
-// reports no error, so nothing looks wrong — until a pane's process exits and
-// the whole window disappears with it instead of staying as a dead pane. The
+// Not because tmux needs telling — measured on 3.4, it routes a window option to
+// the window either way. The reason is the reader: without -w the target looks
+// like a session and the scope has to be inferred.
+//
+// What breaks without the per-window setting is scope, not syntax: a window
+// opened after a session-wide setting does not inherit it, and a pane exiting
+// there takes the whole window with it rather than staying as a dead pane. The
 // UI reads #{pane_dead} to mark a tab stopped and to respawn it, so both stop
 // working, silently.
 //
