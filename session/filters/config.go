@@ -9,15 +9,28 @@ import (
 
 // FilterConfig defines filter rules for an agent
 type FilterConfig struct {
-	SkipContains   []string `json:"skip_contains"`    // Skip if line contains any of these
-	SkipPrefixes   []string `json:"skip_prefixes"`    // Skip if line starts with any of these
-	SkipSuffixes   []string `json:"skip_suffixes"`    // Skip if line ends with any of these
-	SkipExact      []string `json:"skip_exact"`       // Skip if line equals any of these
-	MinSeparators  int      `json:"min_separators"`   // Skip if line has more than N separator chars (─━)
-	ContentPrefix  string   `json:"content_prefix"`   // Extract content after this prefix (e.g., "┃")
-	MinContentLen  int      `json:"min_content_len"`  // Minimum content length to show
-	ShowContains   []string `json:"show_contains"`    // Show special status if line contains (e.g., "Generating")
-	ShowAs         []string `json:"show_as"`          // What to show for each ShowContains match
+	SkipContains  []string `json:"skip_contains"`   // Skip if line contains any of these
+	SkipPrefixes  []string `json:"skip_prefixes"`   // Skip if line starts with any of these
+	SkipSuffixes  []string `json:"skip_suffixes"`   // Skip if line ends with any of these
+	SkipExact     []string `json:"skip_exact"`      // Skip if line equals any of these
+	MinSeparators int      `json:"min_separators"`  // Skip if line has more than N separator chars (─━)
+	ContentPrefix string   `json:"content_prefix"`  // Extract content after this prefix (e.g., "┃")
+	MinContentLen int      `json:"min_content_len"` // Minimum content length to show
+	ShowContains  []string `json:"show_contains"`   // Show special status if line contains (e.g., "Generating")
+	ShowAs        []string `json:"show_as"`         // What to show for each ShowContains match
+	// SkipDotFieldsWithPath skips a line of N or more " · "-separated fields
+	// where one of them is a filesystem path.
+	//
+	// For Codex's bottom bar: "<model> <effort> · <path> · <branch>". Matching
+	// it by model name means every model OpenAI ships leaks into the session's
+	// status line until someone adds it — "gpt-6-astra medium ·
+	// ~/NetBeansProjects/nesting-project · Main [default]" showed up as a
+	// session's status. The shape does not change when the model does.
+	//
+	// The path is what keeps this off ordinary prose: an agent writing "kész ·
+	// a tesztek zöldek · commitolható" has the field count but no path, and is
+	// a real status line worth showing.
+	SkipDotFieldsWithPath int `json:"skip_dot_fields_with_path"`
 }
 
 // AgentFilters holds all agent filter configurations
@@ -104,6 +117,14 @@ func ApplyFilter(config *FilterConfig, cleanLine string) (skip bool, content str
 		}
 	}
 
+	// Check for a path-carrying, dot-separated bar
+	if config.SkipDotFieldsWithPath > 0 {
+		fields := strings.Split(cleanLine, " · ")
+		if len(fields) >= config.SkipDotFieldsWithPath && anyFieldIsPath(fields) {
+			return true, ""
+		}
+	}
+
 	// Check suffixes
 	for _, suffix := range config.SkipSuffixes {
 		if strings.HasSuffix(cleanLine, suffix) {
@@ -158,9 +179,18 @@ func getDefaultFilters() AgentFilters {
 			MinSeparators: 20,
 		},
 		"codex": {
-			SkipContains:  []string{"context left", "? for"},
-			SkipPrefixes:  []string{">", "codex>", "›", "╭", "╰", "│"},
-			MinSeparators: 20,
+			SkipContains: []string{
+				"context left",
+				"? for",
+				"esc to interrupt",
+				"Implement {feature}",
+				"Find and fix a bug",
+			},
+			SkipPrefixes: []string{">", "codex>", "›", "╭", "╰", "│", "Tip:"},
+			// The bottom bar is "<model> <effort> · <path> · <branch>": three
+			// dot-separated fields, one of them a path.
+			SkipDotFieldsWithPath: 3,
+			MinSeparators:         20,
 		},
 		"amazonq": {
 			SkipContains:  []string{"Amazon Q"},
@@ -168,15 +198,29 @@ func getDefaultFilters() AgentFilters {
 			MinSeparators: 20,
 		},
 		"opencode": {
-			SkipContains:   []string{"ctrl+?", "Context:", "press enter to send", "press esc", "No diagnostics", "GPT-4o", "Cost:"},
-			SkipPrefixes:   []string{"└", "├", "│", "Glob:", "List:", "Task:"},
-			SkipExact:      []string{">", "›"},
-			MinSeparators:  15,
-			ContentPrefix:  "┃",
-			MinContentLen:  15,
-			ShowContains:   []string{"Generating"},
-			ShowAs:         []string{"Generating..."},
+			SkipContains:  []string{"ctrl+?", "Context:", "press enter to send", "press esc", "No diagnostics", "GPT-4o", "Cost:"},
+			SkipPrefixes:  []string{"└", "├", "│", "Glob:", "List:", "Task:"},
+			SkipExact:     []string{">", "›"},
+			MinSeparators: 15,
+			ContentPrefix: "┃",
+			MinContentLen: 15,
+			ShowContains:  []string{"Generating"},
+			ShowAs:        []string{"Generating..."},
 		},
 		"custom": {},
 	}
+}
+
+// anyFieldIsPath reports whether one of the fields looks like a filesystem
+// path: "~/...", "/...", or a bare "./...". Deliberately narrow — it decides
+// whether a line is chrome or something the user should see.
+func anyFieldIsPath(fields []string) bool {
+	for _, field := range fields {
+		field = strings.TrimSpace(field)
+		if strings.HasPrefix(field, "~/") || strings.HasPrefix(field, "/") ||
+			strings.HasPrefix(field, "./") {
+			return true
+		}
+	}
+	return false
 }
