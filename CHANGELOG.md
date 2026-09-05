@@ -10,6 +10,22 @@ This file was started at 0.8.0. Earlier releases are summarised from their
 commits and are shorter for that reason, not smaller. Point releases that only
 carried a fix or two are folded into the version above them.
 
+## 0.9.1 — 2026-09-05
+
+### Fixed
+
+- **A Codex session shows what it is doing, not which model it is using.** The
+  status line showed the CLI's own bottom bar — "gpt-6-astra medium · ~/project
+  · Main [default]" — instead of the work. Codex's status bar, the "esc to
+  interrupt" hint and its "Tip:" lines are now filtered out; the bar is
+  recognised by its shape, so a new model name does not bring it back.
+- **A stopped agent leaves its pane behind again.** `remain-on-exit` and
+  `automatic-rename` were set without `-w`, so they landed on the session rather
+  than the window, where neither exists — and tmux reports no error for that. A
+  pane whose process exited took its whole window with it, which quietly broke
+  both the stopped indicator in the preview and restarting a session by
+  attaching to it.
+
 ## 0.9.0 — 2026-08-11
 
 ### Added
