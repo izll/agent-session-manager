@@ -10,6 +10,24 @@ This file was started at 0.8.0. Earlier releases are summarised from their
 commits and are shorter for that reason, not smaller. Point releases that only
 carried a fix or two are folded into the version above them.
 
+## 0.9.2 — 2026-09-25
+
+### Fixed
+
+- **YOLO works for Codex again.** Codex was started with `--full-auto`, which
+  the Codex CLI has removed, so a YOLO Codex session did not start. It now
+  gets `--dangerously-bypass-approvals-and-sandbox`, the flag Codex has today.
+
+### Changed
+
+- **Codex starts without its background server.** Codex 0.157 runs sessions
+  through a shared background server that ignores the YOLO flag — Codex then
+  asks for approval and runs in a sandbox — and that sometimes fails to
+  start. Codex is now started with `--no-daemon` when the installed version
+  supports it; older versions are started as before. Set
+  `"codex_use_daemon": true` in `~/.config/agent-session-manager/config.json`
+  to keep the background server (see the README).
+
 ## 0.9.1 — 2026-09-05
 
 ### Fixed
