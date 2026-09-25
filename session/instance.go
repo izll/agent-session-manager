@@ -76,11 +76,13 @@ var AgentConfigs = map[AgentType]AgentConfig{
 		SupportsAutoYes: true,
 		AutoYesFlag:     "--yes",
 	},
+	// Codex dropped --full-auto; the bypass flag is what it still has for
+	// running without approval prompts or a sandbox.
 	AgentCodex: {
 		Command:            "codex",
 		SupportsResume:     true,
 		SupportsAutoYes:    true,
-		AutoYesFlag:        "--full-auto",
+		AutoYesFlag:        "--dangerously-bypass-approvals-and-sandbox",
 		ResumeFlag:         "resume",
 		ResumeIsSubcommand: true,
 	},
