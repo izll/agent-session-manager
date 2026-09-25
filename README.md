@@ -573,6 +573,7 @@ Configuration files are stored in `~/.config/agent-session-manager/`:
 
 ```
 ~/.config/agent-session-manager/
+├── config.json                # App-wide settings (optional)
 ├── projects.json              # Project list & metadata
 ├── sessions.json              # Default (no project) sessions
 └── projects/
@@ -608,6 +609,22 @@ Customize status line filtering for each agent. Default filters are built-in, bu
   }
 }
 ```
+
+### config.json (optional)
+Settings that apply to every project. Read once per run: restart the app after changing it.
+
+```json
+{
+  "codex_use_daemon": false
+}
+```
+
+- `codex_use_daemon` — let Codex (0.157+) run on its shared background server.
+  Off by default: Codex is started with `--no-daemon` when the installed version
+  has that flag. **Warning:** in daemon mode Codex ignores
+  `--dangerously-bypass-approvals-and-sandbox`, so a YOLO session still asks for
+  approval and runs sandboxed, and the server sometimes fails to start
+  (openai/codex #9144, #14068, #46252). Turn it on only if you need the daemon.
 
 ## Architecture
 

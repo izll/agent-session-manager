@@ -408,7 +408,6 @@ func confirmYolo(tmuxSessionName, windowIndex string, enableYolo bool) error {
 
 	// Build restart command
 	var args []string
-	args = append(args, config.Command)
 	if enableYolo && config.AutoYesFlag != "" {
 		args = append(args, config.AutoYesFlag)
 	}
@@ -424,7 +423,7 @@ func confirmYolo(tmuxSessionName, windowIndex string, enableYolo bool) error {
 
 	// Respawn the pane with new command
 	target := fmt.Sprintf("%s:%s", tmuxSessionName, windowIndex)
-	cmdStr := strings.Join(args, " ")
+	cmdStr := config.CommandLine(args...)
 	session.TmuxCommand("respawn-pane", "-t", target, "-k", cmdStr).Run()
 
 	// Refresh status bar

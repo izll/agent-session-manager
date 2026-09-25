@@ -1032,7 +1032,7 @@ func (m Model) handleNewTabKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					sessionName := inst.TmuxSessionName()
 
 					// Build resume command
-					resumeCmd := config.Command + " " + config.ResumeFlag
+					resumeCmd := config.CommandLine(config.ResumeFlag)
 
 					// Create new window with resume picker
 					cmd := session.TmuxCommand("new-window", "-t", sessionName, "-c", inst.Path, "-n", name, resumeCmd)
@@ -2406,10 +2406,11 @@ func (m Model) handleResumeChoiceKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					// Main window - respawn with resume picker
 					target := fmt.Sprintf("%s:%d", sessionName, currentWindowIdx)
 					// Kill current pane and respawn with resume command
-					resumeCmd := config.Command + " " + config.ResumeFlag
+					resumeArgs := []string{config.ResumeFlag}
 					if inst.AutoYes && config.SupportsAutoYes && config.AutoYesFlag != "" {
-						resumeCmd = resumeCmd + " " + config.AutoYesFlag
+						resumeArgs = append(resumeArgs, config.AutoYesFlag)
 					}
+					resumeCmd := config.CommandLine(resumeArgs...)
 					session.TmuxCommand("respawn-pane", "-t", target, "-k", resumeCmd).Run()
 
 					// Clear main session ID since we're picking new one
@@ -2450,7 +2451,7 @@ func (m Model) handleResumeChoiceKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					}
 
 					// Create new window with resume picker
-					resumeCmd := config.Command + " " + config.ResumeFlag
+					resumeCmd := config.CommandLine(config.ResumeFlag)
 					cmd := session.TmuxCommand("new-window", "-t", sessionName, "-c", inst.Path, "-n", oldName, resumeCmd)
 					cmd.Run()
 

@@ -498,12 +498,13 @@ func (m *Model) launchAgentResume(inst *session.Instance) tea.Cmd {
 		}
 
 		// Always show picker - user might want to override/change session
-		startCmd := config.Command + " " + config.ResumeFlag
+		startArgs := []string{config.ResumeFlag}
 
 		// Add auto-yes flag if enabled
 		if inst.AutoYes && config.SupportsAutoYes && config.AutoYesFlag != "" {
-			startCmd = startCmd + " " + config.AutoYesFlag
+			startArgs = append(startArgs, config.AutoYesFlag)
 		}
+		startCmd := config.CommandLine(startArgs...)
 
 		// Create tmux session
 		sessionName := inst.TmuxSessionName()
@@ -537,12 +538,7 @@ func (m *Model) launchAgentResume(inst *session.Instance) tea.Cmd {
 	}
 
 	// Build the resume command for running session (picker mode)
-	var resumeCmd string
-	if config.ResumeIsSubcommand {
-		resumeCmd = config.Command + " " + config.ResumeFlag
-	} else {
-		resumeCmd = config.Command + " " + config.ResumeFlag
-	}
+	resumeCmd := config.CommandLine(config.ResumeFlag)
 
 	// Session is already running - send the resume command to the active pane
 	sessionName := inst.TmuxSessionName()

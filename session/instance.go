@@ -53,6 +53,7 @@ type AgentConfig struct {
 	AutoYesFlag        string // The flag for auto-approve (e.g., "--dangerously-skip-permissions")
 	ResumeFlag         string // The flag for resume (e.g., "--resume")
 	ResumeIsSubcommand bool   // If true, resume is a subcommand (e.g., "codex resume") not a flag
+	NoDaemonFlag       string // Keeps the agent off its shared background server, where it has one (see codex_daemon.go)
 }
 
 // AgentConfigs maps agent types to their configurations
@@ -85,6 +86,7 @@ var AgentConfigs = map[AgentType]AgentConfig{
 		AutoYesFlag:        "--dangerously-bypass-approvals-and-sandbox",
 		ResumeFlag:         "resume",
 		ResumeIsSubcommand: true,
+		NoDaemonFlag:       "--no-daemon",
 	},
 	AgentAmazonQ: {
 		Command:            "q",
@@ -238,6 +240,58 @@ func (i *Instance) TmuxSessionName() string {
 	return i.ID
 }
 
+// startArgs returns the app's arguments for starting the session's agent,
+// resuming resumeID — or the conversation it last had — when the agent can.
+// A resumeID given here becomes the session's own.
+func (i *Instance) startArgs(config AgentConfig, resumeID string) []string {
+	args := []string{}
+
+	// Handle resume subcommands (codex resume, q chat --resume) vs flags (claude --resume)
+	if config.SupportsResume && config.ResumeIsSubcommand {
+		// Resume is a subcommand - put it first, then flags, then session ID
+		if resumeID != "" || i.ResumeSessionID != "" {
+			// Add resume subcommand
+			args = append(args, config.ResumeFlag)
+
+			// Add auto-yes flag after subcommand if supported
+			if i.AutoYes && config.SupportsAutoYes && config.AutoYesFlag != "" {
+				args = append(args, config.AutoYesFlag)
+			}
+
+			// Add session ID
+			if resumeID != "" {
+				args = append(args, resumeID)
+				i.ResumeSessionID = resumeID
+			} else if i.ResumeSessionID != "" {
+				args = append(args, i.ResumeSessionID)
+			}
+		} else {
+			// No resume - just add auto-yes flag if needed
+			if i.AutoYes && config.SupportsAutoYes && config.AutoYesFlag != "" {
+				args = append(args, config.AutoYesFlag)
+			}
+		}
+	} else {
+		// Resume is a flag - add auto-yes first, then resume flag
+		// Add auto-yes flag if supported and enabled
+		if i.AutoYes && config.SupportsAutoYes && config.AutoYesFlag != "" {
+			args = append(args, config.AutoYesFlag)
+		}
+
+		// Add resume flag if supported and specified
+		if config.SupportsResume && config.ResumeFlag != "" {
+			if resumeID != "" {
+				args = append(args, config.ResumeFlag, resumeID)
+				i.ResumeSessionID = resumeID
+			} else if i.ResumeSessionID != "" {
+				args = append(args, config.ResumeFlag, i.ResumeSessionID)
+			}
+		}
+	}
+
+	return args
+}
+
 // CheckAgentCommand verifies that the agent command exists in PATH
 func CheckAgentCommand(inst *Instance) error {
 	var cmdToCheck string
@@ -302,52 +356,7 @@ func (i *Instance) StartWithResume(resumeID string) error {
 			}
 		} else {
 			cmdToCheck = config.Command
-			args := []string{}
-
-			// Handle resume subcommands (codex resume, q chat --resume) vs flags (claude --resume)
-			if config.SupportsResume && config.ResumeIsSubcommand {
-				// Resume is a subcommand - put it first, then flags, then session ID
-				if resumeID != "" || i.ResumeSessionID != "" {
-					// Add resume subcommand
-					args = append(args, config.ResumeFlag)
-
-					// Add auto-yes flag after subcommand if supported
-					if i.AutoYes && config.SupportsAutoYes && config.AutoYesFlag != "" {
-						args = append(args, config.AutoYesFlag)
-					}
-
-					// Add session ID
-					if resumeID != "" {
-						args = append(args, resumeID)
-						i.ResumeSessionID = resumeID
-					} else if i.ResumeSessionID != "" {
-						args = append(args, i.ResumeSessionID)
-					}
-				} else {
-					// No resume - just add auto-yes flag if needed
-					if i.AutoYes && config.SupportsAutoYes && config.AutoYesFlag != "" {
-						args = append(args, config.AutoYesFlag)
-					}
-				}
-			} else {
-				// Resume is a flag - add auto-yes first, then resume flag
-				// Add auto-yes flag if supported and enabled
-				if i.AutoYes && config.SupportsAutoYes && config.AutoYesFlag != "" {
-					args = append(args, config.AutoYesFlag)
-				}
-
-				// Add resume flag if supported and specified
-				if config.SupportsResume && config.ResumeFlag != "" {
-					if resumeID != "" {
-						args = append(args, config.ResumeFlag, resumeID)
-						i.ResumeSessionID = resumeID
-					} else if i.ResumeSessionID != "" {
-						args = append(args, config.ResumeFlag, i.ResumeSessionID)
-					}
-				}
-			}
-
-			agentCmd = config.Command + " " + strings.Join(args, " ")
+			agentCmd = config.CommandLine(i.startArgs(config, resumeID)...)
 		}
 
 		// Check if the command exists
@@ -492,10 +501,7 @@ func (i *Instance) restoreFollowedWindows() {
 				if i.AutoYes && config.SupportsAutoYes && config.AutoYesFlag != "" {
 					args = append(args, config.AutoYesFlag)
 				}
-				agentCmd = config.Command
-				if len(args) > 0 {
-					agentCmd = agentCmd + " " + strings.Join(args, " ")
-				}
+				agentCmd = config.CommandLine(args...)
 			}
 
 			// Create new window with agent command
@@ -637,10 +643,7 @@ func (i *Instance) RespawnWindow(windowIdx int) error {
 			if i.AutoYes && config.SupportsAutoYes && config.AutoYesFlag != "" {
 				args = append(args, config.AutoYesFlag)
 			}
-			agentCmd = config.Command
-			if len(args) > 0 {
-				agentCmd = agentCmd + " " + strings.Join(args, " ")
-			}
+			agentCmd = config.CommandLine(args...)
 		}
 	} else {
 		// Followed window - find the agent type
@@ -658,10 +661,7 @@ func (i *Instance) RespawnWindow(windowIdx int) error {
 					if i.AutoYes && config.SupportsAutoYes && config.AutoYesFlag != "" {
 						args = append(args, config.AutoYesFlag)
 					}
-					agentCmd = config.Command
-					if len(args) > 0 {
-						agentCmd = agentCmd + " " + strings.Join(args, " ")
-					}
+					agentCmd = config.CommandLine(args...)
 				}
 				break
 			}
@@ -729,10 +729,7 @@ func (i *Instance) RespawnWindowWithResume(windowIdx int, resumeID string) error
 			if config.SupportsResume && config.ResumeFlag != "" && resumeID != "" {
 				args = append(args, config.ResumeFlag, resumeID)
 			}
-			agentCmd = config.Command
-			if len(args) > 0 {
-				agentCmd = agentCmd + " " + strings.Join(args, " ")
-			}
+			agentCmd = config.CommandLine(args...)
 		}
 	} else {
 		// Followed window - find the agent type
@@ -753,10 +750,7 @@ func (i *Instance) RespawnWindowWithResume(windowIdx int, resumeID string) error
 					if config.SupportsResume && config.ResumeFlag != "" && resumeID != "" {
 						args = append(args, config.ResumeFlag, resumeID)
 					}
-					agentCmd = config.Command
-					if len(args) > 0 {
-						agentCmd = agentCmd + " " + strings.Join(args, " ")
-					}
+					agentCmd = config.CommandLine(args...)
 				}
 				break
 			}
@@ -866,23 +860,19 @@ func (i *Instance) buildAgentCommand(agent AgentType, customCmd string, autoYes 
 		config = AgentConfigs[AgentClaude] // Default to Claude
 	}
 
-	cmd := config.Command
+	var args []string
 
 	// Add resume flag if applicable
 	if resumeID != "" && config.SupportsResume {
-		if config.ResumeIsSubcommand {
-			cmd = cmd + " " + config.ResumeFlag + " " + resumeID
-		} else {
-			cmd = cmd + " " + config.ResumeFlag + " " + resumeID
-		}
+		args = append(args, config.ResumeFlag, resumeID)
 	}
 
 	// Add auto-yes flag if applicable
 	if autoYes && config.SupportsAutoYes {
-		cmd = cmd + " " + config.AutoYesFlag
+		args = append(args, config.AutoYesFlag)
 	}
 
-	return cmd
+	return config.CommandLine(args...)
 }
 
 // CloseWindow closes a tmux window by index and removes it from FollowedWindows
@@ -1211,10 +1201,7 @@ func (i *Instance) NewAgentWindow(name string, agent AgentType, customCmd string
 		if i.AutoYes && config.SupportsAutoYes && config.AutoYesFlag != "" {
 			args = append(args, config.AutoYesFlag)
 		}
-		agentCmd = config.Command
-		if len(args) > 0 {
-			agentCmd = agentCmd + " " + strings.Join(args, " ")
-		}
+		agentCmd = config.CommandLine(args...)
 	}
 
 	// Create new window with agent command
@@ -1301,7 +1288,7 @@ func (i *Instance) NewForkedTab(name string, sessionID string) error {
 	// Add resume flag with forked session ID
 	args = append(args, config.ResumeFlag, sessionID)
 
-	agentCmd := config.Command + " " + strings.Join(args, " ")
+	agentCmd := config.CommandLine(args...)
 
 	// Create new window with forked agent
 	cmd := TmuxCommand("new-window", "-t", sessionName, "-c", i.Path, "-n", name, agentCmd)
