@@ -34,7 +34,7 @@ type historyLoadedMsg struct {
 // Version info
 const (
 	AppName    = "asmgr"
-	AppVersion = "0.9.1"
+	AppVersion = "0.9.2"
 )
 
 // Layout constants
